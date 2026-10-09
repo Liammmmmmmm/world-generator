@@ -1,0 +1,206 @@
+// Paramètres du générateur d'île.
+// Convention : null = tiré de la seed. Toute valeur non-null override le tirage.
+// Unités : mètres, années, degrés, °C. 1 bloc = world.block_size_m.
+{
+  "seed": 42,
+
+  "world": {
+    "width": 4096,
+    "length": 4096,
+    "block_size_m": 1.0,
+    "chunk_size": 32,                  // chunks cubiques
+    "sea_level_y": 0,                  // en blocs
+    "vertical_exaggeration": 1.0       // appliqué à la voxelisation uniquement
+  },
+
+  "simulation": {
+    "coarse_resolution": 1024,         // grille de l'étape 3
+    "total_duration_years": null,      // [1e5, 2e7]
+    "dt_years": null,                  // [500, 1e4]
+    "climate_update_interval_steps": 10,
+    "boundary_depth_m": null           // fond océanique imposé au bord [-1500, -200]
+  },
+
+  "origin": {
+    "type": null,                      // "volcanic" | "continental" | "sedimentary" | "coral"
+    "type_weights": { "volcanic": 0.25, "continental": 0.45, "sedimentary": 0.2, "coral": 0.1 },
+    "age": null                        // [0,1] 0 = jeune/vif, 1 = vieux/usé ; module durée et uplift
+  },
+
+  "shape": {
+    "radius_ratio": null,              // rayon moyen / demi-taille [0.4, 0.8]
+    "lobe_count": null,                // [1, 5]
+    "lobe_spread": null,               // [0, 1]
+    "noise": { "frequency": null, "amplitude": null, "octaves": null, "lacunarity": 2.0, "gain": 0.5 },
+    "coast_falloff_m": null,           // largeur de la transition terre/mer du masque
+    "shelf_width_m": null,             // plateau continental [50, 1500]
+    "shelf_depth_m": null,             // [-60, -10]
+    "keep_satellite_islets": true,
+    "min_islet_area_m2": 2000
+  },
+
+  "initial_topography": {
+    "mode": null,                      // "flat" | "peneplain" | "noise" | "volcanic_cone"
+    "base_elevation_m": null,
+    "noise": { "frequency": null, "amplitude_m": null, "octaves": null },
+    "volcano": {
+      "count": null,                   // [1, 3]
+      "height_m": null,
+      "radius_m": null,
+      "profile_exponent": null,        // forme du cône [1, 3]
+      "crater_radius_m": null,
+      "caldera": null,                 // bool
+      "caldera_depth_m": null,
+      "lava_flow_count": null
+    }
+  },
+
+  "geology": {
+    "materials": {
+      // hardness [0,1] ; erodibility = multiplicateur de K ; talus en degrés ; sediment = grain produit
+      "basalt":    { "hardness": 0.80, "erodibility": 0.6, "talus_angle_deg": 45, "sediment": "gravel" },
+      "granite":   { "hardness": 0.90, "erodibility": 0.4, "talus_angle_deg": 50, "sediment": "sand" },
+      "gneiss":    { "hardness": 0.85, "erodibility": 0.5, "talus_angle_deg": 48, "sediment": "sand" },
+      "schist":    { "hardness": 0.50, "erodibility": 1.2, "talus_angle_deg": 38, "sediment": "clay" },
+      "limestone": { "hardness": 0.60, "erodibility": 1.0, "talus_angle_deg": 55, "sediment": "clay" },
+      "sandstone": { "hardness": 0.45, "erodibility": 1.3, "talus_angle_deg": 42, "sediment": "sand" },
+      "shale":     { "hardness": 0.25, "erodibility": 2.0, "talus_angle_deg": 30, "sediment": "clay" },
+      "tuff":      { "hardness": 0.30, "erodibility": 1.8, "talus_angle_deg": 35, "sediment": "sand" }
+    },
+    "strata": null,                    // [{ "material": "limestone", "thickness_m": 40 }, ...] de haut en bas
+    "strata_count": null,              // [3, 12]
+    "strata_top_m": null,              // altitude du sommet de la pile
+    "basement_material": null,         // matériau sous la pile
+    "folding": {
+      "enabled": null,
+      "axis_angle_deg": null,
+      "wavelength_m": null,
+      "amplitude_m": null,
+      "asymmetry": null,               // [0,1] plis déversés
+      "plunge_deg": null
+    },
+    "faults": null,                    // [{ "x": .., "y": .., "angle_deg": .., "length_m": .., "dip_deg": .., "offset_m": .. }]
+    "fault_count": null,
+    "intrusions": null,                // [{ "material": "granite", "x": .., "y": .., "radius_m": .., "top_m": .. }]
+    "intrusion_count": null
+  },
+
+  "tectonics": {
+    "phases": null,
+    // [{ "type": "collision" | "dome" | "horst_graben" | "block_uplift" | "tilt" | "subsidence",
+    //    "start_years": .., "end_years": .., "rate_m_per_year": ..,
+    //    "center": [x, y], "angle_deg": .., "length_m": .., "width_m": .., "falloff": .. }]
+    "phase_count": null,
+    "max_uplift_rate_m_per_year": null // [1e-5, 5e-3]
+  },
+
+  "climate": {
+    "base_temperature_c": null,        // au niveau de la mer [-10, 30]
+    "lapse_rate_c_per_km": 6.5,
+    "humidity": null,                  // [0,1]
+    "base_precipitation_m_per_year": null,
+    "wind": { "direction_deg": null, "strength": null, "variability_deg": null },
+    "swell": { "direction_deg": null, "energy": null },
+    "orographic": { "condensation_rate": null, "rain_shadow_strength": null, "moisture_recharge_over_sea": null }
+  },
+
+  "timeline": {
+    "sea_level_curve": null,           // [{ "t_years": .., "level_m": .. }] interpolé linéairement
+    "glaciations": null,               // [{ "start_years": .., "end_years": .., "temperature_offset_c": .. }]
+    "glaciation_count": null
+  },
+
+  "erosion": {
+    "fluvial": {
+      "k_base": null,                  // [1e-6, 1e-4]
+      "m": 0.45,
+      "n": 1.0,
+      "deposition_g": null,            // coefficient de dépôt (Yuan 2019) [0, 2]
+      "precipitation_weighted": true
+    },
+    "hillslope": { "diffusivity_m2_per_year": null },
+    "thermal": { "iterations_per_step": 1, "rate": null },
+    "glacial": {
+      "accumulation_rate": null,
+      "ablation_gradient": null,
+      "deformation_coeff": null,       // SIA
+      "sliding_coeff": null,
+      "erosion_coeff": null,
+      "erosion_exponent": 1.0
+    },
+    "coastal": {
+      "wave_erosion_coeff": null,
+      "fetch_ray_count": 32,
+      "fetch_max_distance_m": null,
+      "platform_depth_m": null,
+      "sediment_export_threshold": null // énergie au-dessus de laquelle les débris partent au large
+    },
+    "detail_hydraulic": {
+      "method": "droplet",             // "droplet" | "pipe"
+      "droplet_count": null,
+      "inertia": 0.05,
+      "capacity": 4.0,
+      "erosion_rate": 0.3,
+      "deposition_rate": 0.3,
+      "evaporation": 0.01,
+      "radius": 3,
+      "max_lifetime": 64
+    },
+    "aeolian": {
+      "enabled": null,
+      "sand_supply": null,
+      "iterations": null,
+      "slab_height_m": 0.2,
+      "hop_length_m": null,
+      "deposit_prob_sand": 0.6,
+      "deposit_prob_bare": 0.4,
+      "repose_angle_deg": 34,
+      "shadow_angle_deg": 15
+    }
+  },
+
+  "hydrology": {
+    "river_min_area_m2": null,
+    "width_coeff": null,               // largeur = coeff * A^exp
+    "width_exponent": 0.5,
+    "depth_coeff": null,
+    "depth_exponent": 0.4,
+    "lake_min_area_m2": null,
+    "waterfall_min_drop_blocks": 2
+  },
+
+  "present_climate": {
+    "temperature_offset_c": 0.0,
+    "glacier_min_thickness_m": null,
+    "snow_min_altitude_offset_m": 0
+  },
+
+  "soil": {
+    "formation_rate": null,
+    "max_depth_m": null,
+    "slope_limit_deg": null
+  },
+
+  "biomes": {
+    "transition_noise": { "frequency": null, "amplitude": null },
+    "table": null                      // surcharge de la table climat → biome
+  },
+
+  "voxelization": {
+    "surface_material_by_slope": true,
+    "strata_jitter_m": null,
+    "overhangs": { "enabled": true, "min_slope_deg": 60, "noise_frequency": null, "depth_blocks": null },
+    "sea_notches": { "enabled": true, "min_exposure": null, "height_blocks": null, "depth_blocks": null }
+  },
+
+  "caves":      { "enabled": false },
+  "vegetation": { "enabled": false },
+  "structures": { "enabled": false },
+
+  "debug": {
+    "stop_after_stage": null,          // nom d'étape
+    "dump_stages": [],                 // étapes dont on écrit les cartes intermédiaires
+    "cache_dir": "./cache",
+    "force_recompute_from": null
+  }
+}

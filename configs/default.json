@@ -1,0 +1,13 @@
+{
+  "seed": 13377,
+  "width": 4096,
+  "length": 4096,
+
+  // Stages run in order; each one sees what the previous ones produced.
+  "pipeline": [
+    { "type": "perlin", "name": "continents", "op": "set", "wavelength": 600, "octaves": 3, "amplitude": 50, "offset": 78 },
+    { "type": "perlin", "name": "hills", "op": "add", "wavelength": 120, "octaves": 4, "amplitude": 20 },
+    { "type": "island_mask", "start": 0.55, "end": 0.95 },
+    { "type": "voxelize" }
+  ]
+}
