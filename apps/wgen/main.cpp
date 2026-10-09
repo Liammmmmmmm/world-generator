@@ -6,6 +6,7 @@
 #include <exception>
 #include <filesystem>
 #include <optional>
+#include <stdexcept>
 #include <string_view>
 
 #include "wg/core/Config.hpp"
@@ -63,26 +64,30 @@ int main(int argc, char** argv) {
         std::printf("Generating %dx%d world (seed %llu, %zu stages)\n", config.width, config.length,
                     static_cast<unsigned long long>(config.seed), pipeline.size());
 
-        int index = 0;
-        const auto snapshots = pipeline.run(config.info(), [&](const wg::Snapshot& snapshot) {
-            ++index;
-            std::printf("  %2d. %-16s %-12s %8.1f ms\n", index, snapshot.stageName.c_str(), snapshot.stageType.c_str(),
-                        snapshot.seconds * 1000.0);
+        wg::PipelineCallbacks callbacks;
+        callbacks.onStageDone = [&](std::size_t index, const wg::Snapshot& snapshot) {
+            std::printf("  %2zu. %-16s %-12s %8.1f ms\n", index + 1, snapshot.stageName.c_str(),
+                        snapshot.stageType.c_str(), snapshot.seconds * 1000.0);
             if (stagesDir) {
                 char fileName[256];
-                std::snprintf(fileName, sizeof fileName, "%02d_%s.png", index, snapshot.stageName.c_str());
-                const auto image =
-                    wg::renderView(snapshot.state, wg::defaultView(snapshot), wg::ColorMap::Terrain);
-                wg::writePng(image, *stagesDir / fileName);
+                std::snprintf(fileName, sizeof fileName, "%02zu_%s.png", index + 1, snapshot.stageName.c_str());
+                if (const auto view = wg::defaultView(snapshot); wg::hasView(snapshot.state, view))
+                    wg::writePng(wg::renderView(snapshot.state, view, wg::ColorMap::Terrain), *stagesDir / fileName);
             }
-        });
+        };
+        const auto snapshots = pipeline.run(config.info(), callbacks);
+        if (snapshots.empty())
+            throw std::runtime_error("the pipeline is empty, nothing to generate");
         const wg::Snapshot& final = snapshots.back();
 
         wg::writeWorld(final.state, *outPath);
         std::printf("World saved to %s\n", outPath->string().c_str());
 
         if (pngPath) {
-            wg::writePng(wg::renderView(final.state, wg::defaultView(final), wg::ColorMap::Terrain), *pngPath);
+            const auto view = wg::defaultView(final);
+            if (!wg::hasView(final.state, view))
+                throw std::runtime_error("the final world has nothing to render");
+            wg::writePng(wg::renderView(final.state, view, wg::ColorMap::Terrain), *pngPath);
             std::printf("Map saved to %s\n", pngPath->string().c_str());
         }
         if (stagesDir)

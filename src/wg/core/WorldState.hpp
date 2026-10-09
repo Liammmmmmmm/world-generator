@@ -53,6 +53,15 @@ public:
     const void* layerIdentity(std::string_view name) const;
     const void* voxelsIdentity() const { return voxels_.get(); }
 
+    // Same, but keeps the data alive (and so the address unique) while held.
+    std::shared_ptr<const void> layerHandle(std::string_view name) const;
+    std::shared_ptr<const void> voxelsHandle() const { return voxels_; }
+
+    // Copy that shares no mutable data with this state, so it stays valid even
+    // if a stage keeps writing through references it obtained from edit*().
+    // Used for live previews of a running stage.
+    WorldState deepCopy() const;
+
 private:
     using LayerPtr = std::shared_ptr<Grid2D<float>>;
 

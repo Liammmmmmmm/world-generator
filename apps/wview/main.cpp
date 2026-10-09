@@ -1,18 +1,19 @@
-// wview: interactive preview of a generated world, stage by stage.
+// wview: interactive, live preview of a world generation, stage by stage.
 //
 //   wview <config.json | world.wgw>
 //
-// With a config file, the whole pipeline runs in-process, every intermediate
-// stage can be inspected, and everything is regenerated each time the file is
-// saved, for a fast tweak-and-look loop.
+// With a config file, the pipeline runs on a background thread: stages show up
+// in the list as they run, and the running stage can be watched while it works.
+// Everything is regenerated each time the config file is saved.
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
 #include <map>
+#include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -21,9 +22,9 @@
 #include <raymath.h>
 #include <rlgl.h>
 
+#include "GenerationJob.hpp"
 #include "Meshes.hpp"
 #include "wg/core/Config.hpp"
-#include "wg/gen/Pipeline.hpp"
 #include "wg/io/WorldFile.hpp"
 #include "wg/render/MapRenderer.hpp"
 
@@ -34,8 +35,10 @@ namespace {
 constexpr Color kBackground{24, 26, 30, 255};
 constexpr Color kText{230, 230, 230, 255};
 constexpr Color kDimText{150, 150, 155, 255};
+constexpr Color kPendingText{100, 100, 105, 255};
 constexpr Color kPanel{0, 0, 0, 170};
 constexpr Color kHighlight{70, 110, 200, 200};
+constexpr Color kProgress{90, 170, 110, 255};
 constexpr Color kError{255, 100, 90, 255};
 
 constexpr int kFont = 18;
@@ -43,28 +46,31 @@ constexpr int kLine = 22;
 constexpr int kPanelWidth = 330;
 constexpr int kMargin = 8;
 
+// How often a running stage sends a live preview (each one is re-rendered).
+constexpr double kPreviewInterval = 0.1;
+
 enum class ViewMode { Map2D, Terrain3D };
 
 class Viewer {
 public:
     explicit Viewer(fs::path source) : source_(std::move(source)), isConfig_(source_.extension() == ".json") {}
 
-    ~Viewer() { clearGpuCache(); }
+    ~Viewer() {
+        job_.reset();
+        retiredJobs_.clear();
+        clearGpuCache();
+    }
 
     void run() {
         reload();
         while (!WindowShouldClose()) {
+            syncJob();
             handleInput();
             watchSource();
 
             BeginDrawing();
             ClearBackground(kBackground);
-            if (hasView()) {
-                if (mode_ == ViewMode::Map2D)
-                    drawMap();
-                else
-                    drawTerrain();
-            }
+            drawWorld();
             drawPanel();
             drawStatusBar();
             EndDrawing();
@@ -72,25 +78,22 @@ public:
     }
 
 private:
-    // --- Data ----------------------------------------------------------------
-
-    const wg::Snapshot& current() const { return snapshots_[selected_]; }
-    const wg::WorldState& state() const { return current().state; }
-
-    bool hasView() const {
-        if (snapshots_.empty())
-            return false;
-        const auto views = wg::availableViews(state());
-        return std::find(views.begin(), views.end(), view_) != views.end();
-    }
+    // --- Generation ------------------------------------------------------------
 
     void reload() {
         try {
-            const auto start = std::chrono::steady_clock::now();
-            std::vector<wg::Snapshot> snapshots;
+            wg::WorldInfo info;
             if (isConfig_) {
                 const auto config = wg::WorldConfig::load(source_);
-                snapshots = wg::Pipeline::fromConfig(config).run(config.info());
+                auto pipeline = wg::Pipeline::fromConfig(config);
+                info = config.info();
+                // The previous job may still be running a stage that never reports
+                // progress: let it finish in the background instead of blocking.
+                if (job_) {
+                    job_->cancel();
+                    retiredJobs_.push_back(std::move(job_));
+                }
+                job_ = std::make_unique<GenerationJob>(std::move(pipeline), info, kPreviewInterval);
             } else {
                 wg::Snapshot snapshot;
                 snapshot.state = wg::readWorld(source_);
@@ -98,30 +101,21 @@ private:
                 snapshot.stageType = "file";
                 snapshot.changedLayers = snapshot.state.layerNames();
                 snapshot.voxelsChanged = snapshot.state.hasVoxels();
-                snapshots.push_back(std::move(snapshot));
+                info = snapshot.state.info();
+                slots_ = {StageSlot{{snapshot.stageName, "file"}, StageStatus::Done, 1.0f, std::move(snapshot)}};
             }
-            const std::chrono::duration<double, std::milli> elapsed = std::chrono::steady_clock::now() - start;
 
-            const bool firstLoad = snapshots_.empty();
-            const auto& newInfo = snapshots.back().state.info();
-            const bool resized =
-                !firstLoad && (newInfo.width != state().info().width || newInfo.length != state().info().length);
-
-            // Cached GPU resources point into the old snapshots.
-            clearGpuCache();
-            snapshots_ = std::move(snapshots);
-            const int last = static_cast<int>(snapshots_.size()) - 1;
-            selectStage(firstLoad ? last : std::min(selected_, last), /*keepView=*/!firstLoad);
-            if (firstLoad || resized)
+            const bool resized = !info_ || info_->width != info.width || info_->length != info.length;
+            info_ = info;
+            if (resized)
                 resetCameras();
-
-            status_ = (isConfig_ ? "Generated in " : "Loaded in ") + std::to_string(static_cast<int>(elapsed.count())) +
-                      " ms";
-            statusIsError_ = false;
+            configError_.clear();
+            jobError_.clear();
+            if (!job_)
+                onSlotsChanged();
         } catch (const std::exception& e) {
             // Keep showing the previous result so a typo in the config is not disruptive.
-            status_ = e.what();
-            statusIsError_ = true;
+            configError_ = e.what();
         }
         std::error_code ec;
         lastWrite_ = fs::last_write_time(source_, ec);
@@ -137,73 +131,153 @@ private:
             reload();
     }
 
-    void selectStage(int index, bool keepView = false) {
-        selected_ = std::clamp(index, 0, static_cast<int>(snapshots_.size()) - 1);
-        const auto views = wg::availableViews(state());
-        if (!keepView || std::find(views.begin(), views.end(), view_) == views.end())
-            view_ = wg::defaultView(current());
+    void syncJob() {
+        if (job_ && job_->poll(slots_, jobError_))
+            onSlotsChanged();
+        std::erase_if(retiredJobs_, [](const auto& job) { return job->finished(); });
+    }
+
+    void onSlotsChanged() {
+        if (slots_.empty()) {
+            selected_ = 0;
+            return;
+        }
+        selected_ = std::clamp(selected_, 0, static_cast<int>(slots_.size()) - 1);
+        if (following_) {
+            const auto running = std::find_if(slots_.begin(), slots_.end(), [](const StageSlot& s) {
+                return s.status == StageStatus::Running || s.status == StageStatus::Failed;
+            });
+            int target = selected_;
+            if (running != slots_.end())
+                target = static_cast<int>(running - slots_.begin());
+            else if (slots_.back().status == StageStatus::Done)
+                target = static_cast<int>(slots_.size()) - 1;
+            if (target != selected_) {
+                selected_ = target;
+                wantDefaultView_ = true;
+            }
+        }
+        ensureView();
+        pruneGpuCache();
+    }
+
+    // --- Selection -------------------------------------------------------------
+
+    const wg::Snapshot* currentSnapshot() const {
+        if (slots_.empty() || !slots_[selected_].snapshot)
+            return nullptr;
+        return &*slots_[selected_].snapshot;
+    }
+
+    void selectStage(int index) {
+        if (slots_.empty())
+            return;
+        selected_ = std::clamp(index, 0, static_cast<int>(slots_.size()) - 1);
+        const StageStatus status = slots_[selected_].status;
+        following_ = status == StageStatus::Running ||
+                     (selected_ == static_cast<int>(slots_.size()) - 1 && status == StageStatus::Done);
+        wantDefaultView_ = true;
+        ensureView();
+    }
+
+    // Picks what the stage produced when arriving on it (possibly later, once
+    // its first preview arrives), or when the current view no longer exists.
+    void ensureView() {
+        const wg::Snapshot* snapshot = currentSnapshot();
+        if (!snapshot)
+            return;
+        if (wantDefaultView_ || !wg::hasView(snapshot->state, view_)) {
+            view_ = wg::defaultView(*snapshot);
+            wantDefaultView_ = false;
+        }
     }
 
     void cycleView() {
-        const auto views = wg::availableViews(state());
+        const wg::Snapshot* snapshot = currentSnapshot();
+        if (!snapshot)
+            return;
+        const auto views = wg::availableViews(snapshot->state);
         if (views.empty())
             return;
         auto it = std::find(views.begin(), views.end(), view_);
         view_ = (it == views.end() || ++it == views.end()) ? views.front() : *it;
     }
 
-    // --- GPU resources (cached per data, mode and color map) -----------------
+    // --- GPU resources -----------------------------------------------------------
+    //
+    // Cached per (data, mode, color map). Each entry keeps its data alive so the
+    // address cannot be reused by another layer; entries whose data is no longer
+    // referenced by any stage are dropped.
 
+    using GpuKey = std::tuple<const void*, ViewMode, int>;
     struct GpuEntry {
+        std::shared_ptr<const void> data;
         Texture2D texture{};
         Model model{};
     };
-    using GpuKey = std::tuple<const void*, ViewMode, int>;
 
-    const GpuEntry& gpuResource() {
+    const GpuEntry& gpuResource(const wg::WorldState& state) {
         const bool voxels = view_.kind == wg::View::Kind::Voxels;
-        const void* data = voxels ? state().voxelsIdentity() : state().layerIdentity(view_.layer);
-        const GpuKey key{data, mode_, voxels ? -1 : static_cast<int>(colorMap_)};
+        auto handle = voxels ? state.voxelsHandle() : state.layerHandle(view_.layer);
+        const GpuKey key{handle.get(), mode_, voxels ? -1 : static_cast<int>(colorMap_)};
+        lastDrawn_ = key;
         if (const auto it = gpuCache_.find(key); it != gpuCache_.end())
             return it->second;
 
-        GpuEntry entry;
+        GpuEntry entry{std::move(handle)};
         if (mode_ == ViewMode::Map2D) {
-            const auto image = wg::renderView(state(), view_, colorMap_);
+            const auto image = wg::renderView(state, view_, colorMap_);
             const Image rlImage{const_cast<std::uint8_t*>(image.pixels.data()), image.width, image.height, 1,
                                 PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
             entry.texture = LoadTextureFromImage(rlImage);
             SetTextureFilter(entry.texture, TEXTURE_FILTER_POINT);
         } else if (voxels) {
-            entry.model = buildVoxelModel(state().voxels());
+            entry.model = buildVoxelModel(state.voxels());
         } else {
-            const auto& grid = state().layer(view_.layer);
+            const auto& grid = state.layer(view_.layer);
             const auto range = wg::valueRange(grid);
-            const int sea = state().info().seaLevel;
+            const int sea = state.info().seaLevel;
             const bool terrain = colorMap_ == wg::ColorMap::Terrain;
             entry.model = buildHeightfieldModel(
                 grid.width(), grid.length(),
                 [&](int x, int z) { return terrain ? std::max(grid.at(x, z), static_cast<float>(sea)) : grid.at(x, z); },
                 [&](int x, int z) { return wg::layerColor(grid.at(x, z), colorMap_, range, sea); });
         }
-        return gpuCache_.emplace(key, entry).first->second;
+        return gpuCache_.emplace(key, std::move(entry)).first->second;
+    }
+
+    void unload(const GpuKey& key, GpuEntry& entry) {
+        if (std::get<ViewMode>(key) == ViewMode::Map2D)
+            UnloadTexture(entry.texture);
+        else
+            UnloadModel(entry.model);
+    }
+
+    void pruneGpuCache() {
+        for (auto it = gpuCache_.begin(); it != gpuCache_.end();) {
+            // Only the cache still references this data: no stage shows it anymore.
+            // The last drawn entry stays, to keep something on screen while waiting.
+            if (it->second.data.use_count() == 1 && it->first != lastDrawn_) {
+                unload(it->first, it->second);
+                it = gpuCache_.erase(it);
+            } else {
+                ++it;
+            }
+        }
     }
 
     void clearGpuCache() {
-        for (auto& [key, entry] : gpuCache_) {
-            if (std::get<ViewMode>(key) == ViewMode::Map2D)
-                UnloadTexture(entry.texture);
-            else
-                UnloadModel(entry.model);
-        }
+        for (auto& [key, entry] : gpuCache_)
+            unload(key, entry);
         gpuCache_.clear();
     }
 
-    // --- Cameras & input -----------------------------------------------------
+    // --- Cameras & input -----------------------------------------------------------
 
     void resetCameras() {
-        const auto& info = state().info();
-        const float w = static_cast<float>(info.width), l = static_cast<float>(info.length);
+        if (!info_)
+            return;
+        const float w = static_cast<float>(info_->width), l = static_cast<float>(info_->length);
         const float viewWidth = static_cast<float>(GetScreenWidth() - kPanelWidth - 2 * kMargin);
 
         camera2D_.target = {w * 0.5f, l * 0.5f};
@@ -211,7 +285,7 @@ private:
         camera2D_.rotation = 0.0f;
         camera2D_.zoom = 0.9f * std::min(viewWidth / w, GetScreenHeight() / l);
 
-        orbitTarget_ = {w * 0.5f, static_cast<float>(info.seaLevel), l * 0.5f};
+        orbitTarget_ = {w * 0.5f, static_cast<float>(info_->seaLevel), l * 0.5f};
         orbitYaw_ = 0.8f;
         orbitPitch_ = 0.6f;
         orbitDistance_ = std::max(w, l) * 1.1f;
@@ -226,9 +300,6 @@ private:
     void handleInput() {
         if (IsKeyPressed(KEY_R))
             reload();
-        if (snapshots_.empty())
-            return;
-
         if (IsKeyPressed(KEY_TAB))
             mode_ = mode_ == ViewMode::Map2D ? ViewMode::Terrain3D : ViewMode::Map2D;
         if (IsKeyPressed(KEY_F))
@@ -242,7 +313,7 @@ private:
         if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_LEFT))
             selectStage(selected_ - 1);
         for (int key = KEY_ONE; key <= KEY_NINE; ++key)
-            if (IsKeyPressed(key) && key - KEY_ONE < static_cast<int>(snapshots_.size()))
+            if (IsKeyPressed(key) && key - KEY_ONE < static_cast<int>(slots_.size()))
                 selectStage(key - KEY_ONE);
 
         // Clicking a stage in the panel; dragging only starts outside of it.
@@ -250,7 +321,7 @@ private:
             dragging_ = !mouseOverPanel();
             const Vector2 m = GetMousePosition();
             const int row = static_cast<int>(std::floor((m.y - stageListTop_) / kLine));
-            if (!dragging_ && m.y >= stageListTop_ && row < static_cast<int>(snapshots_.size()))
+            if (!dragging_ && m.y >= stageListTop_ && row < static_cast<int>(slots_.size()))
                 selectStage(row);
         }
         if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT) && !IsMouseButtonDown(MOUSE_BUTTON_RIGHT))
@@ -304,23 +375,30 @@ private:
         return camera;
     }
 
-    // --- Drawing -------------------------------------------------------------
+    // --- Drawing ---------------------------------------------------------------------
 
-    void drawMap() {
-        const auto& info = state().info();
-        const Texture2D& texture = gpuResource().texture;
-        BeginMode2D(camera2D_);
-        DrawTexture(texture, 0, 0, WHITE);
-        DrawRectangleLinesEx({0, 0, static_cast<float>(info.width), static_cast<float>(info.length)},
-                             2.0f / camera2D_.zoom, GRAY);
-        EndMode2D();
-    }
+    void drawWorld() {
+        const GpuEntry* entry = nullptr;
+        if (const wg::Snapshot* snapshot = currentSnapshot(); snapshot && wg::hasView(snapshot->state, view_)) {
+            entry = &gpuResource(snapshot->state);
+        } else if (const auto it = gpuCache_.find(lastDrawn_);
+                   it != gpuCache_.end() && std::get<ViewMode>(lastDrawn_) == mode_) {
+            entry = &it->second; // nothing to show yet: keep the previous image
+        }
+        if (!entry || !info_)
+            return;
 
-    void drawTerrain() {
-        const Model& model = gpuResource().model;
-        BeginMode3D(orbitCamera());
-        DrawModel(model, {0, 0, 0}, 1.0f, WHITE);
-        EndMode3D();
+        if (mode_ == ViewMode::Map2D) {
+            BeginMode2D(camera2D_);
+            DrawTexture(entry->texture, 0, 0, WHITE);
+            DrawRectangleLinesEx({0, 0, static_cast<float>(info_->width), static_cast<float>(info_->length)},
+                                 2.0f / camera2D_.zoom, GRAY);
+            EndMode2D();
+        } else {
+            BeginMode3D(orbitCamera());
+            DrawModel(entry->model, {0, 0, 0}, 1.0f, WHITE);
+            EndMode3D();
+        }
     }
 
     void drawPanel() {
@@ -333,83 +411,125 @@ private:
 
         DrawRectangle(kMargin, kMargin, kPanelWidth, panelHeight_, kPanel);
         text(source_.filename().string() + (isConfig_ ? "  (live reload)" : ""));
-        if (!snapshots_.empty()) {
-            const auto& info = state().info();
-            text(TextFormat("%d x %d   y %d / %d   sea %d", info.width, info.length, info.minY, info.maxY,
-                            info.seaLevel),
+        if (info_)
+            text(TextFormat("%d x %d   y %d / %d   sea %d", info_->width, info_->length, info_->minY, info_->maxY,
+                            info_->seaLevel),
                  kDimText);
-            y += 6;
-            text("Stages  (up/down, 1-9, click)", kDimText);
-            stageListTop_ = static_cast<float>(y);
-            for (int i = 0; i < static_cast<int>(snapshots_.size()); ++i) {
-                const auto& s = snapshots_[i];
-                if (i == selected_)
-                    DrawRectangle(kMargin + 4, y - 2, kPanelWidth - 8, kLine, kHighlight);
-                DrawText(TextFormat("%d. %s", i + 1, s.stageName.c_str()), x, y, kFont, kText);
-                const char* time = TextFormat("%.0f ms", s.seconds * 1000.0);
-                DrawText(time, kMargin + kPanelWidth - 12 - MeasureText(time, kFont), y, kFont, kDimText);
-                y += kLine;
-            }
-            y += 6;
+        y += 6;
 
+        text(slots_.empty() ? "Stages: none (empty pipeline)" : "Stages  (up/down, 1-9, click)", kDimText);
+        stageListTop_ = static_cast<float>(y);
+        for (int i = 0; i < static_cast<int>(slots_.size()); ++i)
+            drawStageRow(i, x, y);
+        y += 6;
+
+        if (const wg::Snapshot* snapshot = currentSnapshot()) {
             std::string views;
-            for (const auto& v : wg::availableViews(state()))
+            for (const auto& v : wg::availableViews(snapshot->state))
                 views += v == view_ ? "[" + v.label() + "] " : v.label() + " ";
-            text("View (L): " + views);
+            text("View (L): " + (views.empty() ? std::string("nothing yet") : views));
             if (view_.kind == wg::View::Kind::Layer)
                 text("Colors (C): " + std::string(wg::colorMapName(colorMap_)));
             else if (mode_ == ViewMode::Terrain3D)
-                text(TextFormat("1 cube = %d blocks (LOD)", voxelLodStep(state().voxels())), kDimText);
+                text(TextFormat("1 cube = %d blocks (LOD)", voxelLodStep(snapshot->state.voxels())), kDimText);
             y += 6;
-            text(mode_ == ViewMode::Map2D ? "2D: drag pan, wheel zoom" : "3D: left orbit, right pan, wheel", kDimText);
-            text("TAB 2D/3D   R reload   F reset view", kDimText);
         }
+        text(mode_ == ViewMode::Map2D ? "2D: drag pan, wheel zoom" : "3D: left orbit, right pan, wheel", kDimText);
+        text("TAB 2D/3D   R regenerate   F reset view", kDimText);
         panelHeight_ = y - kMargin + 4;
     }
 
+    void drawStageRow(int i, int x, int& y) {
+        const StageSlot& slot = slots_[i];
+        const int right = kMargin + kPanelWidth - 12;
+        if (i == selected_)
+            DrawRectangle(kMargin + 4, y - 2, kPanelWidth - 8, kLine, kHighlight);
+
+        Color color = kText;
+        std::string detail;
+        switch (slot.status) {
+        case StageStatus::Pending: color = kPendingText; break;
+        case StageStatus::Running:
+            detail = TextFormat("%d%%", static_cast<int>(slot.progress * 100.0f));
+            DrawRectangle(kMargin + 4, y + kLine - 5, static_cast<int>((kPanelWidth - 8) * slot.progress), 3, kProgress);
+            break;
+        case StageStatus::Done: detail = TextFormat("%.0f ms", slot.snapshot->seconds * 1000.0); break;
+        case StageStatus::Failed:
+            color = kError;
+            detail = "failed";
+            break;
+        }
+        DrawText(TextFormat("%d. %s", i + 1, slot.description.name.c_str()), x, y, kFont, color);
+        DrawText(detail.c_str(), right - MeasureText(detail.c_str(), kFont), y, kFont,
+                 slot.status == StageStatus::Failed ? kError : kDimText);
+        y += kLine;
+    }
+
     void drawStatusBar() {
+        std::string status;
+        bool error = true;
+        if (!configError_.empty())
+            status = configError_;
+        else if (!jobError_.empty())
+            status = jobError_;
+        else {
+            error = false;
+            if (job_ && !job_->finished())
+                status = TextFormat("Generating... %.1f s", job_->elapsedSeconds());
+            else if (job_)
+                status = TextFormat("Generated in %.0f ms", job_->elapsedSeconds() * 1000.0);
+        }
+
         const int h = kLine + 8;
         const int y = GetScreenHeight() - h;
         DrawRectangle(0, y, GetScreenWidth(), h, kPanel);
         const std::string hover = hoverInfo();
         DrawText(hover.c_str(), 12, y + 6, kFont, kText);
         const int statusX = std::max(12 + MeasureText(hover.c_str(), kFont) + 30,
-                                     GetScreenWidth() - MeasureText(status_.c_str(), kFont) - 12);
-        DrawText(status_.c_str(), statusX, y + 6, kFont, statusIsError_ ? kError : kDimText);
+                                     GetScreenWidth() - MeasureText(status.c_str(), kFont) - 12);
+        DrawText(status.c_str(), statusX, y + 6, kFont, error ? kError : kDimText);
     }
 
     std::string hoverInfo() const {
-        if (mode_ != ViewMode::Map2D || !hasView() || mouseOverPanel())
+        const wg::Snapshot* snapshot = currentSnapshot();
+        if (mode_ != ViewMode::Map2D || !snapshot || !wg::hasView(snapshot->state, view_) || mouseOverPanel())
             return "";
+        const auto& state = snapshot->state;
         const Vector2 p = GetScreenToWorld2D(GetMousePosition(), camera2D_);
         const int x = static_cast<int>(std::floor(p.x)), z = static_cast<int>(std::floor(p.y));
-        const auto& info = state().info();
-        if (x < 0 || z < 0 || x >= info.width || z >= info.length)
+        if (x < 0 || z < 0 || x >= state.info().width || z >= state.info().length)
             return "";
         if (view_.kind == wg::View::Kind::Voxels) {
-            const auto& voxels = state().voxels();
+            const auto& voxels = state.voxels();
             const int top = voxels.topNonAir(x, z);
             return TextFormat("x %d  z %d   top y %d  %s", x, z, top,
                               std::string(wg::blockInfo(voxels.get(x, top, z)).name).c_str());
         }
-        return TextFormat("x %d  z %d   %s = %.2f", x, z, view_.layer.c_str(), state().layer(view_.layer).at(x, z));
+        return TextFormat("x %d  z %d   %s = %.2f", x, z, view_.layer.c_str(), state.layer(view_.layer).at(x, z));
     }
 
-    // --- State ---------------------------------------------------------------
+    // --- State -----------------------------------------------------------------------
 
     fs::path source_;
     bool isConfig_;
     fs::file_time_type lastWrite_{};
     double lastWatchCheck_ = 0.0;
 
-    std::vector<wg::Snapshot> snapshots_;
+    std::unique_ptr<GenerationJob> job_;
+    std::vector<std::unique_ptr<GenerationJob>> retiredJobs_; // cancelled, finishing in the background
+    std::vector<StageSlot> slots_;
+    std::optional<wg::WorldInfo> info_;
+    std::string configError_;
+    std::string jobError_;
+
     int selected_ = 0;
+    bool following_ = true; // selection tracks the running stage
+    bool wantDefaultView_ = true;
     wg::View view_;
     wg::ColorMap colorMap_ = wg::ColorMap::Terrain;
-    std::string status_;
-    bool statusIsError_ = false;
 
     std::map<GpuKey, GpuEntry> gpuCache_;
+    GpuKey lastDrawn_{};
 
     ViewMode mode_ = ViewMode::Map2D;
     Camera2D camera2D_{};

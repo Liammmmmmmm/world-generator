@@ -3,15 +3,11 @@ add_library(wg
   wg/core/Config.cpp
   wg/core/VoxelVolume.cpp
   wg/core/WorldState.cpp
-  wg/noise/Perlin.cpp
   wg/gen/Pipeline.cpp
   wg/gen/StageParams.cpp
   wg/gen/StageRegistry.cpp
   wg/gen/stages/BuiltinStages.cpp
   wg/gen/stages/FlatStage.cpp
-  wg/gen/stages/IslandMaskStage.cpp
-  wg/gen/stages/PerlinStage.cpp
-  wg/gen/stages/VoxelizeStage.cpp
   wg/io/PngExport.cpp
   wg/io/WorldFile.cpp
   wg/render/MapRenderer.cpp

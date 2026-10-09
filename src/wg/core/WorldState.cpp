@@ -57,7 +57,7 @@ void WorldState::removeLayer(std::string_view name) {
 
 const VoxelVolume& WorldState::voxels() const {
     if (!voxels_)
-        throw WorldError("the world has no voxels yet (a stage like 'voxelize' must build them first)");
+        throw WorldError("the world has no voxels yet (an earlier stage must build them)");
     return *voxels_;
 }
 
@@ -74,6 +74,22 @@ VoxelVolume& WorldState::createVoxels(Block fill) {
 const void* WorldState::layerIdentity(std::string_view name) const {
     const auto* ptr = findLayer(name);
     return ptr ? ptr->get() : nullptr;
+}
+
+std::shared_ptr<const void> WorldState::layerHandle(std::string_view name) const {
+    const auto* ptr = findLayer(name);
+    return ptr ? *ptr : nullptr;
+}
+
+WorldState WorldState::deepCopy() const {
+    WorldState copy(info_);
+    for (const auto& [name, grid] : layers_)
+        copy.layers_.emplace_back(name, std::make_shared<Grid2D<float>>(*grid));
+    // Copying the volume object is enough: its sections are copy-on-write and
+    // only ever modified through VoxelVolume methods.
+    if (voxels_)
+        copy.voxels_ = std::make_shared<VoxelVolume>(*voxels_);
+    return copy;
 }
 
 } // namespace wg

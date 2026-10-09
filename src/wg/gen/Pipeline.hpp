@@ -1,5 +1,6 @@
 #pragma once
 
+#include <exception>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -19,20 +20,43 @@ public:
     using std::runtime_error::runtime_error;
 };
 
-// World state right after a stage ran. Cheap to keep around (copy-on-write).
+// Thrown out of Pipeline::run() when PipelineCallbacks::shouldCancel says so.
+class GenerationCancelled : public std::exception {
+public:
+    const char* what() const noexcept override { return "generation cancelled"; }
+};
+
+// World state produced by a stage (final, or a preview while it runs).
+// Cheap to copy and keep around (copy-on-write).
 struct Snapshot {
     std::string stageName;
     std::string stageType;
     WorldState state;
-    double seconds = 0.0;
+    double seconds = 0.0;                   // stage duration (so far, for a preview)
     std::vector<std::string> changedLayers; // created or modified by the stage
     bool voxelsChanged = false;
 };
 
+struct StageDescription {
+    std::string name;
+    std::string type;
+};
+
+// Hooks to follow a generation, e.g. from another thread. All are optional and
+// are called on the thread running the pipeline.
+struct PipelineCallbacks {
+    std::function<void(std::size_t index)> onStageStart;
+    // Live state of the running stage, sent when the stage reports progress,
+    // at most once every `previewInterval` seconds.
+    std::function<void(std::size_t index, Snapshot preview, float progress)> onStageProgress;
+    std::function<void(std::size_t index, const Snapshot& result)> onStageDone;
+    // Polled between stages and on every progress report.
+    std::function<bool()> shouldCancel;
+    double previewInterval = 0.1;
+};
+
 class Pipeline {
 public:
-    using StageCallback = std::function<void(const Snapshot&)>;
-
     // Builds the pipeline from config.raw["pipeline"], an array of objects
     // { "type": <stage type>, "name": <optional unique name>, ...params }.
     static Pipeline fromConfig(const WorldConfig& config);
@@ -41,10 +65,12 @@ public:
     Pipeline& add(std::string name, std::string type, std::unique_ptr<Stage> stage);
 
     // Runs all stages and returns one snapshot per stage; the last one is the
-    // final world. Throws GenerationError if a stage fails.
-    std::vector<Snapshot> run(const WorldInfo& info, const StageCallback& onStageDone = {}) const;
+    // final world. Throws GenerationError if a stage fails, GenerationCancelled
+    // if cancelled.
+    std::vector<Snapshot> run(const WorldInfo& info, const PipelineCallbacks& callbacks = {}) const;
 
     std::size_t size() const { return entries_.size(); }
+    std::vector<StageDescription> stages() const;
 
 private:
     struct Entry {

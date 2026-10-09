@@ -25,12 +25,21 @@ Options CMake : `-DWG_BUILD_VIEWER=OFF` (sans raylib), `-DWG_BUILD_TESTS=OFF`.
 # Générer un monde -> output/default.wgw, + carte finale, + une carte par étape
 ./build/apps/wgen/wgen configs/default.json --png output/default.png --stages output/stages
 
-# Visualiser depuis une config : chaque étape est inspectable, et tout est
-# régénéré à chaque sauvegarde du JSON
+# Visualiser depuis une config : la génération se suit en direct, chaque étape
+# est inspectable, et tout est régénéré à chaque sauvegarde du JSON
 ./build/apps/wview/wview configs/default.json
 # ...ou un monde déjà généré
 ./build/apps/wview/wview output/default.wgw
 ```
+
+### Viewer
+
+La génération tourne en arrière-plan : la liste affiche toutes les étapes du pipeline (grisées
+tant qu'elles n'ont pas commencé, avec un pourcentage pendant qu'elles tournent, leur durée une
+fois finies). Tant que la sélection est sur l'étape en cours, elle la suit et affiche son état
+en direct (pour les étapes qui rapportent leur progression, voir plus bas). Sélectionner une
+autre étape arrête le suivi ; revenir sur l'étape en cours le réactive. Sauvegarder le JSON
+annule la génération en cours et en relance une.
 
 ### Contrôles du viewer
 
@@ -55,10 +64,7 @@ réduit sur les grands mondes, indiqué dans le panneau).
   "width": 1024,
   "length": 1024,
   "pipeline": [
-    { "type": "perlin", "name": "continents", "op": "set", "wavelength": 600, "amplitude": 50, "offset": 78 },
-    { "type": "perlin", "name": "hills", "op": "add", "wavelength": 120, "amplitude": 20 },
-    { "type": "island_mask" },
-    { "type": "voxelize" }
+    { "type": "flat" }
   ]
 }
 ```
@@ -80,12 +86,9 @@ sont acceptés.
 
 ### Étapes disponibles
 
-| Type          | Entrée → sortie        | Paramètres (défaut)                                                                                           |
-|---------------|------------------------|---------------------------------------------------------------------------------------------------------------|
-| `flat`        | → calque               | `layer` (`height`), `value` (`seaLevel + 2`)                                                                  |
-| `perlin`      | → calque               | `layer` (`height`), `op` `set`/`add`/`multiply` (`set`), `wavelength` (256), `octaves` (4), `persistence` (0.5), `lacunarity` (2), `amplitude` (32), `offset` (0) |
-| `island_mask` | calque → calque        | `layer` (`height`), `start` (0.5), `end` (0.95), `floor` (`seaLevel - 24`)                                    |
-| `voxelize`    | calque → voxels        | `heightLayer` (`height`), `dirtDepth` (3), `beachHeight` (2)                                                  |
+| Type   | Entrée → sortie | Paramètres (défaut)                           |
+|--------|-----------------|-----------------------------------------------|
+| `flat` | → calque        | `layer` (`height`), `value` (`seaLevel + 2`) |
 
 ## Architecture
 
@@ -97,17 +100,17 @@ src/wg/                    bibliothèque "wg" (aucune dépendance au rendu)
   core/Block               palette de blocs générique (pas de noms Minecraft)
   core/Config              lecture/validation du JSON
   core/Random              RNG déterministe et dérivation de graines
-  noise/Perlin             bruit de Perlin 2D + fBm
   gen/Stage                interface d'une étape
   gen/StageParams          accès typé et validé aux paramètres d'une étape
   gen/StageRegistry        type (string) -> fabrique d'étape
-  gen/Pipeline             construit le pipeline depuis la config, l'exécute, garde un snapshot par étape
+  gen/Pipeline             construit le pipeline depuis la config, l'exécute, garde un snapshot
+                           par étape, notifie début / progression / fin (callbacks, annulation)
   gen/stages/              les étapes ; BuiltinStages.cpp les enregistre
   io/WorldFile             format natif binaire .wgw
   io/PngExport             écriture PNG
   render/MapRenderer       vues, palettes, rendu 2D (partagé par le PNG et le viewer)
 apps/wgen                  CLI
-apps/wview                 viewer raylib 2D/3D
+apps/wview                 viewer raylib 2D/3D, génération dans un thread (GenerationJob)
 tests/                     tests unitaires
 ```
 
@@ -117,10 +120,10 @@ Le monde passe par deux représentations :
 
 - **Calques 2D** (`Grid2D<float>` nommés : `height`, plus tard `moisture`, `flow`...). C'est là
   que travaillent le bruit et l'érosion.
-- **Volume de voxels**, construit à partir des calques par une étape comme `voxelize`, puis
+- **Volume de voxels**, construit à partir des calques par une étape de voxelisation, puis
   modifié par les étapes 3D (grottes, props, structures).
 
-Les deux coexistent : après `voxelize`, les calques restent disponibles pour les étapes
+Les deux coexistent : après la voxelisation, les calques restent disponibles pour les étapes
 suivantes (ex. placer des arbres selon `moisture`).
 
 ### Snapshots
@@ -131,6 +134,28 @@ les calques non modifiés restent partagés. Côté voxels, seules les sections 
 dupliquées. Garder toutes les étapes coûte donc seulement ce que chaque étape a changé. Le
 pipeline note aussi ce que chaque étape a modifié, ce qui permet au viewer d'afficher par
 défaut la bonne donnée.
+
+### Suivi en direct d'une étape
+
+Une étape longue appelle `context.progress(fraction)` régulièrement (par exemple à chaque
+itération d'érosion) :
+
+```cpp
+void ErosionStage::run(WorldState& world, const StageContext& context) {
+    auto& height = world.editLayer("height");
+    for (int i = 0; i < iterations_; ++i) {
+        simulateDroplets(height);
+        context.progress(float(i + 1) / iterations_);
+    }
+}
+```
+
+L'appel est limité en fréquence (10 fois par seconde dans le viewer) et ne coûte rien quand
+personne n'écoute (`wgen`). Quand le viewer écoute, le pipeline prend une copie isolée de l'état
+(`WorldState::deepCopy`). L'étape peut donc garder ses références (`height` ci-dessus) et
+continuer à écrire pendant que le viewer affiche la copie. `progress()` est aussi l'endroit où
+une génération annulée s'arrête : une étape qui ne l'appelle jamais ne peut être interrompue
+qu'à sa fin.
 
 ### Ajouter une étape
 
@@ -144,7 +169,8 @@ défaut la bonne donnée.
 4. L'insérer où on veut dans le `pipeline` du JSON.
 
 Les étapes ne se connaissent pas entre elles : elles ne partagent que des noms de calques.
-Insérer `erosion` entre `perlin` et `voxelize` ne demande donc de toucher à aucune autre étape.
+Insérer une étape `erosion` entre une étape de bruit et la voxelisation ne demande donc de
+toucher à aucune autre étape.
 
 ### Export vers d'autres formats
 

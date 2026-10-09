@@ -1,5 +1,6 @@
 #include "wg/gen/Pipeline.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <set>
 
@@ -9,14 +10,32 @@
 
 namespace wg {
 
+namespace {
+
+using Clock = std::chrono::steady_clock;
+
+double secondsSince(Clock::time_point start) {
+    return std::chrono::duration<double>(Clock::now() - start).count();
+}
+
+// Fills in what `state` changed compared to `before`.
+void diff(Snapshot& snapshot, const WorldState& state, const WorldState& before) {
+    for (const auto& name : state.layerNames())
+        if (state.layerIdentity(name) != before.layerIdentity(name))
+            snapshot.changedLayers.push_back(name);
+    snapshot.voxelsChanged = state.voxelsIdentity() != before.voxelsIdentity();
+}
+
+} // namespace
+
 Pipeline Pipeline::fromConfig(const WorldConfig& config) {
     return fromConfig(config, StageRegistry::builtin());
 }
 
 Pipeline Pipeline::fromConfig(const WorldConfig& config, const StageRegistry& registry) {
     const auto it = config.raw.find("pipeline");
-    if (it == config.raw.end() || !it->is_array() || it->empty())
-        throw ConfigError("'pipeline' must be a non-empty array of stages");
+    if (it == config.raw.end() || !it->is_array())
+        throw ConfigError("'pipeline' must be an array of stages");
 
     Pipeline pipeline;
     std::set<std::string> names;
@@ -48,32 +67,57 @@ Pipeline& Pipeline::add(std::string name, std::string type, std::unique_ptr<Stag
     return *this;
 }
 
-std::vector<Snapshot> Pipeline::run(const WorldInfo& info, const StageCallback& onStageDone) const {
+std::vector<StageDescription> Pipeline::stages() const {
+    std::vector<StageDescription> stages;
+    for (const auto& entry : entries_)
+        stages.push_back({entry.name, entry.type});
+    return stages;
+}
+
+std::vector<Snapshot> Pipeline::run(const WorldInfo& info, const PipelineCallbacks& callbacks) const {
+    const auto checkCancelled = [&] {
+        if (callbacks.shouldCancel && callbacks.shouldCancel())
+            throw GenerationCancelled();
+    };
+
     std::vector<Snapshot> snapshots;
     snapshots.reserve(entries_.size());
 
     WorldState state(info);
-    for (const auto& entry : entries_) {
+    for (std::size_t i = 0; i < entries_.size(); ++i) {
+        const Entry& entry = entries_[i];
+        checkCancelled();
+        if (callbacks.onStageStart)
+            callbacks.onStageStart(i);
+
         // Holding the previous state forces copy-on-write and lets us diff.
         const WorldState before = state;
-        const StageContext context{info, deriveSeed(info.seed, entry.name), entry.name};
+        const auto start = Clock::now();
+        auto lastPreview = start;
 
-        const auto start = std::chrono::steady_clock::now();
+        StageContext context{info, deriveSeed(info.seed, entry.name), entry.name, [&](float fraction) {
+                                 checkCancelled();
+                                 if (!callbacks.onStageProgress || secondsSince(lastPreview) < callbacks.previewInterval)
+                                     return;
+                                 lastPreview = Clock::now();
+                                 Snapshot preview{entry.name, entry.type, {}, secondsSince(start), {}, false};
+                                 diff(preview, state, before);
+                                 preview.state = state.deepCopy();
+                                 callbacks.onStageProgress(i, std::move(preview), std::clamp(fraction, 0.0f, 1.0f));
+                             }};
+
         try {
             entry.stage->run(state, context);
+        } catch (const GenerationCancelled&) {
+            throw;
         } catch (const std::exception& e) {
             throw GenerationError("stage '" + entry.name + "' failed: " + e.what());
         }
-        const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
 
-        Snapshot snapshot{entry.name, entry.type, state, elapsed.count(), {}, false};
-        for (const auto& name : state.layerNames())
-            if (state.layerIdentity(name) != before.layerIdentity(name))
-                snapshot.changedLayers.push_back(name);
-        snapshot.voxelsChanged = state.voxelsIdentity() != before.voxelsIdentity();
-
-        if (onStageDone)
-            onStageDone(snapshot);
+        Snapshot snapshot{entry.name, entry.type, state, secondsSince(start), {}, false};
+        diff(snapshot, state, before);
+        if (callbacks.onStageDone)
+            callbacks.onStageDone(i, snapshot);
         snapshots.push_back(std::move(snapshot));
     }
     return snapshots;

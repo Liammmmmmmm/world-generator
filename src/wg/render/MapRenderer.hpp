@@ -33,6 +33,7 @@ struct View {
 
 // Layers in creation order, then the voxels if any.
 std::vector<View> availableViews(const WorldState& state);
+bool hasView(const WorldState& state, const View& view);
 // What the stage produced: voxels if it changed them, else its first changed layer.
 View defaultView(const Snapshot& snapshot);
 

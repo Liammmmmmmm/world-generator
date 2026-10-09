@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string_view>
 
 #include "wg/core/WorldInfo.hpp"
@@ -13,6 +14,18 @@ struct StageContext {
     const WorldInfo& info;
     std::uint64_t seed;    // derived from the world seed and the stage name
     std::string_view name; // unique stage name in the pipeline
+
+    // Reports how far the stage is (0..1) and lets observers such as the viewer
+    // display the world as it is right now. Rate-limited and cheap when nobody
+    // listens: call it as often as convenient (e.g. once per erosion iteration).
+    // Long stages should call it regularly: it is also where a cancelled
+    // generation stops (by throwing GenerationCancelled).
+    void progress(float fraction) const {
+        if (onProgress)
+            onProgress(fraction);
+    }
+
+    std::function<void(float)> onProgress;
 };
 
 // One step of the generation pipeline (noise, erosion, voxelization, caves...).

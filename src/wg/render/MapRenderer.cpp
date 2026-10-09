@@ -75,6 +75,10 @@ std::vector<View> availableViews(const WorldState& state) {
     return views;
 }
 
+bool hasView(const WorldState& state, const View& view) {
+    return view.kind == View::Kind::Voxels ? state.hasVoxels() : state.hasLayer(view.layer);
+}
+
 View defaultView(const Snapshot& snapshot) {
     if (snapshot.voxelsChanged)
         return {View::Kind::Voxels, {}};
