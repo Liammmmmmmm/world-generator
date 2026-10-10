@@ -434,8 +434,10 @@ void resolveGeology(ParamResolver& r, IslandParams::Geology& g, const IslandPara
     const int intrusionCount = r.listSize("geology.intrusions", "geology.intrusion_count", 0, maxIntrusions);
     for (int i = 0; i < intrusionCount; ++i) {
         IslandParams::Intrusion intrusion;
+        // Volcanic islands: basaltic plugs (granite is rare on oceanic volcanoes);
+        // elsewhere mostly granite plutons.
         intrusion.material = r.pick(at("geology.intrusions", i, "material"),
-                                    knownMaterials(origin.type == "volcanic" ? Weights{{"basalt", 0.7}, {"granite", 0.3}}
+                                    knownMaterials(origin.type == "volcanic" ? Weights{{"basalt", 1.0}}
                                                                              : Weights{{"granite", 0.8}, {"basalt", 0.2}},
                                                    g),
                                     materials);
@@ -452,7 +454,11 @@ void resolveGeology(ParamResolver& r, IslandParams::Geology& g, const IslandPara
             intrusion.y = r.uniform(at("geology.intrusions", i, "y"), -0.6 * radius, 0.6 * radius);
         }
         intrusion.radiusM = r.sample(at("geology.intrusions", i, "radius_m"), [&](double u) { return radius * lerp(0.1, 0.4, u); });
-        intrusion.topM = r.uniform(at("geology.intrusions", i, "top_m"), -200, 400);
+        // Altitude of the top: on old continental crust, eroded plutons may already
+        // outcrop; elsewhere they are still buried (erosion may expose them later).
+        intrusion.topM = r.sample(at("geology.intrusions", i, "top_m"), [&](double u) {
+            return perOrigin<Range>(origin.type, {{{-200, 50}, {-100, 300}, {-300, 0}, {-300, 0}}}).at(u);
+        });
         intrusion.domeK = r.number(at("geology.intrusions", i, "dome_k"), 0.5);
         g.intrusions.push_back(intrusion);
     }

@@ -671,6 +671,9 @@ void testGeologyDeformation() {
     CHECK(name(geology.material(2000, 0, 40, 0, 100, 0)) == "granite");
     CHECK(name(geology.material(2090, 0, 20, 0, 100, 0)) != "granite"); // top 9.5 m at d = 90
     CHECK(name(geology.material(2090, 0, 5, 0, 100, 0)) == "granite");
+    // A bell, not a cylinder: beyond its radius it continues, wider with depth.
+    CHECK(name(geology.material(2150, 0, -50, 0, 100, 0)) != "granite"); // roof at -62.5 m at d = 150
+    CHECK(name(geology.material(2150, 0, -100, 0, 100, 0)) == "granite");
 }
 
 void testDerivedFaultsFollowTheirPhase() {

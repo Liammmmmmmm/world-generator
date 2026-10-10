@@ -4,7 +4,7 @@
 // Fréquences de bruit : en cycles par rayon d'île R (R = shape.radius_ratio * demi-taille de la carte).
 // Coordonnées (x, y, center) : en mètres, origine au centre de la carte.
 {
-  "seed": 2,
+  "seed": 32,
 
   "world": {
     "width": 4096,
@@ -143,7 +143,10 @@
     "fault_count": null,
     "fault_tip_taper": null,           // le décalage d'une faille s'atténue sur cette fraction de sa demi-longueur [0.1, 0.4]
     "intrusions": null,                // [{ "material": "granite", "x": .., "y": .., "radius_m": .., "top_m": .., "dome_k": 0.5 }]
-                                       // dômes testés avant les strates ; île continentale : placées dans la zone de la collision
+                                       // cloches (paraboloïdes) testées avant les strates : sous le sommet top_m, le toit descend
+                                       // de dome_k * radius_m à radius_m de l'axe et continue de s'élargir en profondeur.
+                                       // Matériau : basalte (volcanique), granite surtout (autres). top_m : volc. [-200, 50],
+                                       // cont. [-100, 300] (peut affleurer), séd. et cor. [-300, 0] ; cont. : dans la zone de la collision
     "intrusion_count": null
   },
 

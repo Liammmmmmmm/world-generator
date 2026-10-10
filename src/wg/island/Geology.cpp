@@ -141,10 +141,12 @@ int Geology::strataMaterial(double zRock, double zRef) const {
 
 int Geology::material(double x, double y, double z, double cumUplift, double zRef, double foldOffset) const {
     const double zRock = z - cumUplift - foldOffset - faultOffset(x, y, z); // the strata move with the rock
-    // Intrusions first: domes whose top drops by dome_k * radius at their edge.
+    // Intrusions first: bell-shaped plutons, a paraboloid whose top drops by
+    // dome_k * radius at distance radius from its axis and that keeps widening
+    // with depth (no vertical walls).
     for (const Intrusion& in : intrusions_) {
         const double d = std::hypot(x - in.x, y - in.y);
-        if (d < in.radius && zRock < in.top - in.domeK * (d / in.radius) * (d / in.radius) * in.radius)
+        if (zRock < in.top - in.domeK * d * d / in.radius)
             return in.material;
     }
     return strataMaterial(zRock, zRef);

@@ -19,7 +19,7 @@ namespace wg {
 //     fault-bounded tectonic phases (block_uplift, horst_graben) move whole
 //     blocks between dipping walls, as far as the phase has gone.
 // so a lookup uses z_rock = z - cum_uplift - D_fold - D_fault. Intrusions
-// (domes of a single material) are tested first.
+// (bell-shaped plutons of a single material) are tested first.
 //
 // Coordinates are meters from the map center; altitudes are absolute meters
 // (sea level at the world's sea level).
