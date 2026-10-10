@@ -53,7 +53,9 @@ Model modelFromMeshes(const std::vector<Mesh>& meshes) {
 
 } // namespace
 
-Model buildHeightfieldModel(int width, int length, const HeightFn& height, const ColorFn& color, int maxCells) {
+Model buildHeightfieldModel(int width, int length, const HeightFn& height, const ColorFn& color, int maxCells,
+                            double cellSize) {
+    const auto cell = static_cast<float>(cellSize);
     const int step = std::max(1, (std::max(width, length) + maxCells - 1) / maxCells);
     const int cellsX = std::max(1, (width - 1 + step - 1) / step);
     const int cellsZ = std::max(1, (length - 1 + step - 1) / step);
@@ -65,11 +67,11 @@ Model buildHeightfieldModel(int width, int length, const HeightFn& height, const
     builder.vertices.reserve(static_cast<std::size_t>(cellsX) * cellsZ * 18);
     builder.colors.reserve(static_cast<std::size_t>(cellsX) * cellsZ * 24);
     const auto emit = [&](int x, int z) {
-        const float dx = (heightAt(x + step, z) - heightAt(x - step, z)) / (2.0f * step);
-        const float dz = (heightAt(x, z + step) - heightAt(x, z - step)) / (2.0f * step);
+        const float dx = (heightAt(x + step, z) - heightAt(x - step, z)) / (2.0f * step * cell);
+        const float dz = (heightAt(x, z + step) - heightAt(x, z - step)) / (2.0f * step * cell);
         const Vector3 normal = Vector3Normalize({-dx, 1.0f, -dz});
         const float light = 0.45f + 0.55f * std::max(0.0f, Vector3DotProduct(normal, sun)) / sun.y;
-        builder.vertex(static_cast<float>(x), heightAt(x, z), static_cast<float>(z), color(x, z), light);
+        builder.vertex(static_cast<float>(x) * cell, heightAt(x, z), static_cast<float>(z) * cell, color(x, z), light);
     };
 
     for (int j = 0; j < cellsZ; ++j) {

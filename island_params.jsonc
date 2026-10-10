@@ -1,8 +1,10 @@
 // Paramètres du générateur d'île.
 // Convention : null = tiré de la seed. Toute valeur non-null override le tirage.
 // Unités : mètres, années, degrés, °C. 1 bloc = world.block_size_m.
+// Fréquences de bruit : en cycles par rayon d'île R (R = shape.radius_ratio * demi-taille de la carte).
+// Coordonnées (x, y, center) : en mètres, origine au centre de la carte.
 {
-  "seed": 42,
+  "seed": 2,
 
   "world": {
     "width": 4096,
@@ -18,7 +20,7 @@
     "total_duration_years": null,      // [1e5, 2e7]
     "dt_years": null,                  // [500, 1e4]
     "climate_update_interval_steps": 10,
-    "boundary_depth_m": null           // fond océanique imposé au bord [-1500, -200]
+    "boundary_depth_m": null           // fond océanique imposé au bord [-1500, -200] ; limité pour que la pente du talus tienne dans la carte
   },
 
   "origin": {
@@ -27,31 +29,88 @@
     "age": null                        // [0,1] 0 = jeune/vif, 1 = vieux/usé ; module durée et uplift
   },
 
+  // Les distributions de forme dépendent de origin.type (volcanique / continentale / sédimentaire / corallienne).
   "shape": {
-    "radius_ratio": null,              // rayon moyen / demi-taille [0.4, 0.8]
-    "lobe_count": null,                // [1, 5]
-    "lobe_spread": null,               // [0, 1]
+    "mode": null,                      // "blobs" (lobes) | "ring" (atoll) ; corallienne : ring, autres : blobs
+    "radius_ratio": null,              // demi-longueur de l'île / demi-taille de la carte [0.4, 0.8]
+    "lobe_count": null,                // volc. 1-2, cont. 2-5, séd. 2-4, cor. 1
+    "lobe_spread": null,               // dispersion des centres : volc. [0, 0.3], cont. [0.4, 0.9], séd. [0.2, 0.5], cor. [0, 0.2]
+    "lobe_radius_min": null,           // rayon moyen d'un lobe tiré dans [min, max] * R ; min [0.25, 0.6]
+    "lobe_radius_max": null,           // min + [0.1, 0.5], au plus 1 ; petits lobes = presqu'îles, gros = une seule masse
+    "lobe_elongation_max": null,       // lobes elliptiques : allongement de chaque lobe dans [1, max] ; max cont. [1, 2], autres [1, 1.5]
+    "lobe_alignment": null,            // [0, 1] : 0 = lobes orientés au hasard, 1 = tous alignés sur l'axe ; séd. [0.8, 1]
+    "main_axis_deg": null,             // axe principal [0, 180] ; sert aussi d'axe à la 1re phase "collision" et aux plis (île continentale)
+    "elongation": null,                // >= 1, étirement de toute la forme le long de l'axe :
+                                       // volc. [1, 1.3], cont. 60 % [1.5, 2.5] / 40 % [1, 1.5], séd. [3, 8], cor. [1, 1.5]
+    "lobe_blend": null,                // [0, 0.3] * R : union adoucie des lobes (comble les creux entre eux)
+    "bay_count": null,                 // lobes soustractifs (baies). P(0/1/2) : cont. 50/35/15 %, volc. 70/30/0, séd. 85/15/0, cor. 100/0/0
+    "bay_radius_min": 0.15,            // rayon d'une baie dans [min, max] * R
+    "bay_radius_max": 0.35,
+    "bay_penetration": null,           // [0.3, 0.8] : 0 = la baie effleure la côte, 1 = centrée dans les terres
+    // mode "ring" : un récif annulaire suit le contour de la forme, autour d'un lagon
+    "ring_width_m": null,              // largeur moyenne de l'anneau [80, 250]
+    "ring_width_noise": null,          // variation relative de la largeur [0.3, 0.8]
+    "ring_noise_frequency": null,      // fréquence des passes et de la variation de largeur, en cycles par rayon [1.5, 4]
+    "ring_noise_octaves": null,        // octaves de ce bruit [1, 3] : peu d'octaves = quelques passes larges
+    "ring_offset_m": null,             // retrait de l'axe de l'anneau vers l'intérieur du contour ; [0.5, 1] * ring_width_m
+    "ring_pass_fraction": null,        // part de l'anneau coupée par des passes (entre les motus) [0.05, 0.3]
+    // domain warp ; amplitude relative à la demi-largeur de l'île (R / elongation) :
+    // volc. [0.05, 0.15], cont. et séd. [0.1, 0.3], cor. [0.02, 0.06]
     "noise": { "frequency": null, "amplitude": null, "octaves": null, "lacunarity": 2.0, "gain": 0.5 },
     "coast_falloff_m": null,           // largeur de la transition terre/mer du masque
-    "shelf_width_m": null,             // plateau continental [50, 1500]
-    "shelf_depth_m": null,             // [-60, -10]
+    "shelf_width_m": null,             // plateau [10, 1500], part de la mer libre entre l'île et le bord :
+                                       // volc. 3-10 %, cont. 10-35 %, séd. 30-60 % ; cor. : platier de 10 à 50 m
+    "shelf_depth_m": null,             // volc. [-40, -10], cont. [-60, -10], séd. [-15, -3], cor. [-15, -5]
+    "talus_slope_deg": null,           // pente du fond jusqu'à boundary_depth_m : volc. [15, 30], cont. [8, 20], séd. [3, 10], cor. [35, 50]
+    "talus_width_m": null,             // largeur de cette pente ; dérivée : (shelf_depth_m - boundary_depth_m) / tan(talus_slope_deg)
+    "seafloor_noise": { "frequency": null, "amplitude_m": null }, // léger relief du fond au-delà du plateau
     "keep_satellite_islets": true,
     "min_islet_area_m2": 2000
   },
 
+  // Le relief initial dépend de l'origine ; tailles relatives à l'île pour garder des proportions physiques.
   "initial_topography": {
-    "mode": null,                      // "flat" | "peneplain" | "noise" | "volcanic_cone"
-    "base_elevation_m": null,
-    "noise": { "frequency": null, "amplitude_m": null, "octaves": null },
+    "mode": null,                      // "flat" | "peneplain" | "noise" | "volcanic_cone" | "atoll" | "barrier"
+                                       // volc. : volcanic_cone, cont. : peneplain ou noise, séd. : barrier, cor. : atoll
+    "base_elevation_m": null,          // volcanic_cone [0, 30] (plateau sous les cônes), barrier [1, 3],
+                                       // peneplain / noise / flat : 10 + 290 u² (basse le plus souvent), atoll : 0
+    "noise": { "frequency": null, "amplitude_m": null, "octaves": null, "lacunarity": 2.0, "gain": 0.5 },
+                                       // amplitude : peneplain [5, 40], barrier [0.3, 1.5], autres [10, 200]
     "volcano": {
       "count": null,                   // [1, 3]
-      "height_m": null,
-      "radius_m": null,
-      "profile_exponent": null,        // forme du cône [1, 3]
-      "crater_radius_m": null,
-      "caldera": null,                 // bool
-      "caldera_depth_m": null,
-      "lava_flow_count": null
+      "radius_m": null,                // rayon maximal [0.6, 1] * R ; un volcan est réduit (avec sa hauteur et son cratère)
+                                       // pour que son pied arrive à la côte la plus proche de sa cheminée
+      "height_m": null,                // [0.15, 0.45] * radius_m (flancs de quelques dizaines de degrés)
+      "profile_exponent": null,        // forme du cône [1, 3] : h = height * (1 - r / radius)^exposant
+      "flank_noise_frequency": null,   // relief irrégulier des flancs (dévie aussi les coulées), en cycles par rayon [4, 10]
+      "flank_noise_octaves": null,     // [2, 3]
+      "flank_noise_m": null,           // amplitude ; [0.03, 0.08] * R / flank_noise_frequency (pente bornée)
+      "crater_radius_m": null,         // [0.05, 0.15] * radius_m
+      "crater_depth_m": null,          // dérivé de height_m (5 à 15 %)
+      "min_spacing_m": null,           // distance minimale entre cheminées ; [0.5, 1.2] * radius_m. Les cheminées sont
+                                       // tirées dans la moitié intérieure de l'île (distance à la côte >= moitié du maximum)
+      "caldera": null,                 // bool ; probabilité 0.2 + 0.4 * origin.age (au lieu du cratère)
+      "caldera_radius_m": null,        // [0.15, 0.3] * radius_m
+      "caldera_rim_width_m": null,     // largeur de la paroi de la caldeira ; [0.1, 0.3] * caldera_radius_m
+      "caldera_depth_m": null,         // [0.1, 0.3] * height_m
+      "lava_flow_count": null,         // coulées par volcan [0, 8]
+      "lava_flow_height_m": null,      // hauteur de la bosse laissée par une coulée [5, 15]
+      "lava_flow_width_m": null,       // largeur de la coulée [10, 40]
+      "lava_flow_turn_deg": null,      // écart aléatoire à la plus grande pente, à chaque pas [10, 40]
+      "lava_flow_min_slope_deg": null  // la coulée s'arrête sur une pente plus faible (ou en mer) [1, 3]
+    },
+    "atoll": {
+      "makatea": null,                 // atoll soulevé à falaises ; probabilité 0.15
+      "ring_height_m": null,           // hauteur de l'anneau : [1, 4], ou [30, 60] si makatea
+      "ring_noise_m": null,            // relief de l'anneau ; [0.1, 0.3] * ring_height_m
+      "lagoon_depth_m": null,          // profondeur du lagon [5, 40]
+      "lagoon_noise_m": null,          // relief du fond du lagon ; [0.05, 0.2] * lagoon_depth_m
+      "pinnacle_count": null,          // pinacles coralliens dans le lagon [3, 15]
+      "pinnacle_radius_m": null,       // [10, 40]
+      "pinnacle_top_depth_m": null     // les pinacles remontent jusqu'à cette profondeur [1, 2]
+    },
+    "barrier": {
+      "crest_height_m": null           // crête basse le long de l'île, maximale au milieu de la largeur [1, 5]
     }
   },
 
@@ -74,22 +133,31 @@
     "folding": {
       "enabled": null,
       "axis_angle_deg": null,
-      "wavelength_m": null,
-      "amplitude_m": null,
+      "wavelength_m": null,            // [0.4, 1.5] * R
+      "amplitude_m": null,             // [0.03, 0.2] * wavelength_m
       "asymmetry": null,               // [0,1] plis déversés
       "plunge_deg": null
     },
     "faults": null,                    // [{ "x": .., "y": .., "angle_deg": .., "length_m": .., "dip_deg": .., "offset_m": .. }]
+                                       // trace centrée sur (x, y) ; le côté à gauche de la direction angle_deg monte de offset_m
     "fault_count": null,
-    "intrusions": null,                // [{ "material": "granite", "x": .., "y": .., "radius_m": .., "top_m": .. }]
+    "fault_tip_taper": null,           // le décalage d'une faille s'atténue sur cette fraction de sa demi-longueur [0.1, 0.4]
+    "intrusions": null,                // [{ "material": "granite", "x": .., "y": .., "radius_m": .., "top_m": .., "dome_k": 0.5 }]
+                                       // dômes testés avant les strates ; île continentale : placées dans la zone de la collision
     "intrusion_count": null
   },
 
+  // Tectonique par origine : volcanique = 0 ou 1 dôme faible ; sédimentaire et corallienne = 0 ou 1 subsidence
+  // faible ; continentale = 1 à 4 phases, palette complète. Seuls les motifs spatiaux sont calculés à l'étape 2.
   "tectonics": {
     "phases": null,
     // [{ "type": "collision" | "dome" | "horst_graben" | "block_uplift" | "tilt" | "subsidence",
-    //    "start_years": .., "end_years": .., "rate_m_per_year": ..,
-    //    "center": [x, y], "angle_deg": .., "length_m": .., "width_m": .., "falloff": .. }]
+    //    "start_years": .., "end_years": .., "rate_m_per_year": .. (>= 0 ; le motif porte le signe),
+    //    "center": [x, y], "angle_deg": .., "length_m": .., "width_m": ..,
+    //    "falloff": .. (largeur des bords, fraction de la demi-taille ; étroite pour block_uplift et horst_graben),
+    //    "fault_dip_deg": .. (pendage des failles générées pour block_uplift et horst_graben [55, 80]) }]
+    // Les phases block_uplift et horst_graben génèrent des failles le long de leurs bords (visibles dans
+    // geology.derived_faults, toujours recalculées) : le côté soulevé est décalé dans le même sens que le relief.
     "phase_count": null,
     "max_uplift_rate_m_per_year": null // [1e-5, 5e-3]
   },

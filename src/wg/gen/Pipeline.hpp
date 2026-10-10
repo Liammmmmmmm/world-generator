@@ -35,6 +35,7 @@ struct Snapshot {
     double seconds = 0.0;                   // stage duration (so far, for a preview)
     std::vector<std::string> changedLayers; // created or modified by the stage
     bool voxelsChanged = false;
+    bool paramsChanged = false;
 };
 
 struct StageDescription {
@@ -58,7 +59,8 @@ struct PipelineCallbacks {
 class Pipeline {
 public:
     // Builds the pipeline from config.raw["pipeline"], an array of objects
-    // { "type": <stage type>, "name": <optional unique name>, ...params }.
+    // { "type": <stage type>, "name": <optional unique name>, ...params }, or
+    // the default island pipeline (StageRegistry::defaultPipeline) if absent.
     static Pipeline fromConfig(const WorldConfig& config);
     static Pipeline fromConfig(const WorldConfig& config, const StageRegistry& registry);
 
@@ -67,7 +69,7 @@ public:
     // Runs all stages and returns one snapshot per stage; the last one is the
     // final world. Throws GenerationError if a stage fails, GenerationCancelled
     // if cancelled.
-    std::vector<Snapshot> run(const WorldInfo& info, const PipelineCallbacks& callbacks = {}) const;
+    std::vector<Snapshot> run(const WorldConfig& config, const PipelineCallbacks& callbacks = {}) const;
 
     std::size_t size() const { return entries_.size(); }
     std::vector<StageDescription> stages() const;

@@ -29,6 +29,8 @@ public:
 
     // Every stage shipped with the generator (see gen/stages/BuiltinStages.cpp).
     static const StageRegistry& builtin();
+    // Stage types run, in order, when the config has no "pipeline" key.
+    static const std::vector<std::string>& defaultPipeline();
 
 private:
     std::map<std::string, Factory, std::less<>> factories_;

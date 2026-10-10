@@ -9,8 +9,10 @@
 namespace wg {
 
 class WorldState;
+struct WorldConfig;
 
 struct StageContext {
+    const WorldConfig& config; // seed, raw document and resolved parameters
     const WorldInfo& info;
     std::uint64_t seed;    // derived from the world seed and the stage name
     std::string_view name; // unique stage name in the pipeline

@@ -15,6 +15,15 @@ FetchContent_MakeAvailable(stb)
 add_library(stb INTERFACE)
 target_include_directories(stb SYSTEM INTERFACE ${stb_SOURCE_DIR})
 
+# FastNoiseLite (header-only): OpenSimplex2 / fBm noise
+FetchContent_Declare(fastnoiselite
+  URL https://github.com/Auburn/FastNoiseLite/archive/refs/tags/v1.1.1.tar.gz
+  URL_HASH SHA256=8b1d439af1ae88eaf8d3d0838540796dfc92ddd216230b2816f0c5bcbb3c9824
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(fastnoiselite)
+add_library(fastnoiselite INTERFACE)
+target_include_directories(fastnoiselite SYSTEM INTERFACE ${fastnoiselite_SOURCE_DIR}/Cpp)
+
 # raylib: windowing + rendering for the viewer
 if(WG_BUILD_VIEWER)
   set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

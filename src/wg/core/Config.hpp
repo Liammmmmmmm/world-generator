@@ -2,11 +2,13 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <stdexcept>
 
 #include <nlohmann/json.hpp>
 
 #include "wg/core/WorldInfo.hpp"
+#include "wg/params/IslandParams.hpp"
 
 namespace wg {
 
@@ -15,20 +17,15 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+// A loaded config: the seed and every generation parameter, resolved (drawn
+// from the seed, then overridden by the non-null values of the file).
 struct WorldConfig {
     std::uint64_t seed = 0;
-    int width = 0;  // X extent, in blocks
-    int length = 0; // Z extent, in blocks
+    nlohmann::json raw; // whole document, as given
+    std::shared_ptr<const ResolvedParams> params;
 
-    // Optional keys (defaults match a modern Minecraft overworld).
-    int minY = -64;
-    int maxY = 320; // exclusive
-    int seaLevel = 62;
-
-    // Whole document (the generation pipeline is read from raw["pipeline"]).
-    nlohmann::json raw;
-
-    WorldInfo info() const { return {width, length, minY, maxY, seaLevel, seed}; }
+    const IslandParams& island() const { return params->values; }
+    WorldInfo info() const;
 
     static WorldConfig fromJson(const nlohmann::json& json);
     static WorldConfig load(const std::filesystem::path& path);

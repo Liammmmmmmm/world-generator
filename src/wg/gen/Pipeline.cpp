@@ -24,6 +24,7 @@ void diff(Snapshot& snapshot, const WorldState& state, const WorldState& before)
         if (state.layerIdentity(name) != before.layerIdentity(name))
             snapshot.changedLayers.push_back(name);
     snapshot.voxelsChanged = state.voxelsIdentity() != before.voxelsIdentity();
+    snapshot.paramsChanged = state.paramsHandle() != before.paramsHandle();
 }
 
 } // namespace
@@ -34,7 +35,15 @@ Pipeline Pipeline::fromConfig(const WorldConfig& config) {
 
 Pipeline Pipeline::fromConfig(const WorldConfig& config, const StageRegistry& registry) {
     const auto it = config.raw.find("pipeline");
-    if (it == config.raw.end() || !it->is_array())
+    if (it == config.raw.end()) {
+        Pipeline pipeline;
+        for (const auto& type : StageRegistry::defaultPipeline()) {
+            StageParams params(nlohmann::json::object());
+            pipeline.add(type, type, registry.create(type, params));
+        }
+        return pipeline;
+    }
+    if (!it->is_array())
         throw ConfigError("'pipeline' must be an array of stages");
 
     Pipeline pipeline;
@@ -74,7 +83,8 @@ std::vector<StageDescription> Pipeline::stages() const {
     return stages;
 }
 
-std::vector<Snapshot> Pipeline::run(const WorldInfo& info, const PipelineCallbacks& callbacks) const {
+std::vector<Snapshot> Pipeline::run(const WorldConfig& config, const PipelineCallbacks& callbacks) const {
+    const WorldInfo info = config.info();
     const auto checkCancelled = [&] {
         if (callbacks.shouldCancel && callbacks.shouldCancel())
             throw GenerationCancelled();
@@ -95,12 +105,12 @@ std::vector<Snapshot> Pipeline::run(const WorldInfo& info, const PipelineCallbac
         const auto start = Clock::now();
         auto lastPreview = start;
 
-        StageContext context{info, deriveSeed(info.seed, entry.name), entry.name, [&](float fraction) {
+        StageContext context{config, info, deriveSeed(info.seed, entry.name), entry.name, [&](float fraction) {
                                  checkCancelled();
                                  if (!callbacks.onStageProgress || secondsSince(lastPreview) < callbacks.previewInterval)
                                      return;
                                  lastPreview = Clock::now();
-                                 Snapshot preview{entry.name, entry.type, {}, secondsSince(start), {}, false};
+                                 Snapshot preview{entry.name, entry.type, {}, secondsSince(start), {}, false, false};
                                  diff(preview, state, before);
                                  preview.state = state.deepCopy();
                                  callbacks.onStageProgress(i, std::move(preview), std::clamp(fraction, 0.0f, 1.0f));
@@ -114,7 +124,7 @@ std::vector<Snapshot> Pipeline::run(const WorldInfo& info, const PipelineCallbac
             throw GenerationError("stage '" + entry.name + "' failed: " + e.what());
         }
 
-        Snapshot snapshot{entry.name, entry.type, state, secondsSince(start), {}, false};
+        Snapshot snapshot{entry.name, entry.type, state, secondsSince(start), {}, false, false};
         diff(snapshot, state, before);
         if (callbacks.onStageDone)
             callbacks.onStageDone(i, snapshot);

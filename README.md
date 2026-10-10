@@ -6,6 +6,9 @@ mais indépendant de tout format de jeu.
 Comme le monde est généré en entier (et pas chunk par chunk), les étapes peuvent faire des
 traitements globaux : érosion, rivières, simulation climatique...
 
+> Pour comprendre le fonctionnement interne (architecture, algorithmes de chaque étape),
+> voir le [wiki](wiki/README.md).
+
 ## Build
 
 Prérequis : CMake ≥ 3.24 et un compilateur C++20. Les dépendances sont téléchargées
@@ -22,14 +25,18 @@ Options CMake : `-DWG_BUILD_VIEWER=OFF` (sans raylib), `-DWG_BUILD_TESTS=OFF`.
 ## Utilisation
 
 ```sh
-# Générer un monde -> output/default.wgw, + carte finale, + une carte par étape
-./build/apps/wgen/wgen configs/default.json --png output/default.png --stages output/stages
+# Générer un monde -> output/island_params.wgw, + paramètres résolus,
+# + carte finale, + une carte par étape
+./build/apps/wgen/wgen island_params.jsonc --params output/params.json --png output/map.png --stages output/stages
+
+# Galerie : beaucoup de seeds d'un coup, en vignettes (ici 16 par origine)
+./build/apps/wgen/wgen island_params.jsonc --gallery output/gallery.png --origin all --count 16 --resolution 512
 
 # Visualiser depuis une config : la génération se suit en direct, chaque étape
-# est inspectable, et tout est régénéré à chaque sauvegarde du JSON
-./build/apps/wview/wview configs/default.json
+# est inspectable, et tout est régénéré à chaque sauvegarde du fichier
+./build/apps/wview/wview island_params.jsonc
 # ...ou un monde déjà généré
-./build/apps/wview/wview output/default.wgw
+./build/apps/wview/wview output/island_params.wgw
 ```
 
 ### Viewer
@@ -46,59 +53,126 @@ annule la génération en cours et en relance une.
 | Touche                  | Action                                                          |
 |-------------------------|-----------------------------------------------------------------|
 | `↑` `↓` / `1`-`9` / clic | Choisir l'étape affichée                                        |
-| `L`                     | Changer la donnée affichée (calque 2D `height`, ..., `voxels`) |
-| `C`                     | Palette des calques 2D : `terrain` / `grayscale`                |
+| `L`                     | Changer la donnée affichée (`parameters`, calques 2D, `voxels`) |
+| `C`                     | Palette : `auto` (selon le type de calque) / `grayscale`        |
 | `TAB`                   | Vue 2D (carte) / 3D                                             |
 | `R` / `F`               | Régénérer / recadrer la caméra                                  |
+| `X`                     | Coupe verticale de la roche (panneau en bas)                    |
+| `S` / `Q` `E` / molette | Coupe : placer son centre sous la souris / la tourner / exagération verticale |
 | 2D                      | Glisser : déplacer, molette : zoom, survol : valeur sous la souris |
 | 3D                      | Clic gauche : orbite, clic droit : déplacer, molette : zoom     |
+
+Palettes `auto` : altitudes en teintes hypsométriques avec ombrage, et mer en bleu selon la
+profondeur ; champs signés en divergent bleu / blanc / rouge ; matériaux avec une couleur
+chacun et une légende ; autres champs en niveaux de gris. En 3D, le relief vient de `h` et il
+est coloré par le calque affiché.
+
+La vue `parameters` liste tous les paramètres résolus, colorés selon leur origine (vert : tiré
+de la seed, blanc : fichier de config, gris : défaut fixe). Molette pour défiler.
 
 En 3D, les calques 2D sont affichés en relief et les voxels en cubes (avec un niveau de détail
 réduit sur les grands mondes, indiqué dans le panneau).
 
 ## Configuration
 
+La config de référence est [`island_params.jsonc`](island_params.jsonc) (JSON avec commentaires
+`//`). Elle décrit tous les paramètres du générateur d'île, section par section.
+
+### Résolution des paramètres (étape 1)
+
+**Convention :** `null` = tiré de la seed, toute autre valeur override le tirage.
+
+- **Un flux aléatoire par paramètre**, dérivé de la seed et du chemin du paramètre
+  (`shape.radius_ratio`, `geology.strata[2].thickness_m`...). La valeur est toujours tirée,
+  puis remplacée par celle du fichier si elle n'est pas `null`. Overrider un paramètre, ou en
+  ajouter un nouveau dans le code, ne décale donc jamais la valeur des autres.
+- **Dépendances.** Certaines distributions dépendent de paramètres déjà résolus, surtout
+  `origin.type` et `origin.age` : matériaux des strates, mode de topographie initiale, durée de
+  simulation, taux de soulèvement, probabilité de plissement, nombre de glaciations selon la
+  température... Elles utilisent la valeur finale, override comprise : forcer
+  `origin.type: "volcanic"` donne des strates de basalte et de tuf, avec les mêmes tirages.
+- **Listes** (`geology.strata`, `faults`, `intrusions`, `tectonics.phases`,
+  `timeline.glaciations`). Si le fichier donne un tableau, sa longueur fixe le nombre
+  d'éléments. Les champs absents ou `null` d'un élément sont tirés comme les autres ;
+  `{ "material": "granite" }` fixe le matériau et tire l'épaisseur. Sinon, le nombre vient de
+  `*_count`, tiré ou fixé. `timeline.sea_level_curve` est dérivée des glaciations, chacune ayant
+  un champ `sea_level_drop_m`, sauf si elle est donnée en entier.
+- **Paramètres sans aléatoire** (`world.*`, `erosion.fluvial.m`...) : la valeur du fichier, ou
+  un défaut fixe si elle est `null`.
+- **Validation.** Les types, les choix possibles (`origin.type`, matériaux connus de
+  `geology.materials`...) et les clés inconnues (fautes de frappe) sont vérifiés au chargement,
+  avec le chemin du paramètre fautif.
+
+Les distributions sont toutes dans [`IslandParams.cpp`](src/wg/params/IslandParams.cpp). Les
+plages notées `[a, b]` dans le fichier y sont reprises telles quelles ; les autres sont des
+choix plausibles, à ajuster. `wgen --params out.json` écrit la config complète, avec toutes les
+valeurs remplies : réutilisée comme config, elle redonne exactement les mêmes paramètres.
+
+Unités : mètres, années, degrés, °C. Les fréquences de bruit sont en cycles par km, et les
+coordonnées (`x`, `y`, `center`) en mètres depuis le coin de la carte. `world.min_y` et
+`world.max_y` (défauts `-64` / `320`) bornent le monde voxel ; ils sont provisoires, à revoir
+avec la voxelisation.
+
+### Pipeline
+
+Sans clé `pipeline`, le générateur exécute le pipeline d'île par défaut
+(`StageRegistry::defaultPipeline()` dans `BuiltinStages.cpp`), complété au fur et à mesure des
+étapes. Une clé `pipeline` permet de le remplacer, pour tester une étape isolément :
+
 ```jsonc
-{
-  "seed": 1337,
-  "width": 1024,
-  "length": 1024,
-  "pipeline": [
-    { "type": "flat" }
-  ]
-}
+"pipeline": [ { "type": "parameters" }, { "type": "island_init" } ]
 ```
 
-| Clé        | Type             | Défaut | Description                                  |
-|------------|------------------|--------|----------------------------------------------|
-| `seed`     | entier ou texte  | requis | Graine (un texte est hashé, comme Minecraft) |
-| `width`    | entier > 0       | requis | Taille en X (blocs)                          |
-| `length`   | entier > 0       | requis | Taille en Z (blocs)                          |
-| `minY`     | entier           | `-64`  | Y minimum du monde                           |
-| `maxY`     | entier           | `320`  | Y maximum (exclu)                            |
-| `seaLevel` | entier           | `62`   | Niveau de la mer                             |
-| `pipeline` | tableau          | requis | Étapes de génération, exécutées dans l'ordre |
-
-Chaque étape du pipeline est un objet avec un `type`, un `name` optionnel (par défaut le type ;
-il doit être unique et sert aussi à dériver la graine de l'étape) et ses paramètres. Les
-paramètres inconnus (fautes de frappe) sont signalés comme des erreurs. Les commentaires `//`
-sont acceptés.
+Chaque entrée a un `type`, un `name` optionnel (unique, sert aussi à dériver la graine de
+l'étape) et les paramètres propres à l'étape.
 
 ### Étapes disponibles
 
-| Type   | Entrée → sortie | Paramètres (défaut)                           |
-|--------|-----------------|-----------------------------------------------|
-| `flat` | → calque        | `layer` (`height`), `value` (`seaLevel + 2`) |
+| Type          | Rôle                                                                                          |
+|---------------|-----------------------------------------------------------------------------------------------|
+| `parameters`  | Étape 1 : publie les paramètres résolus dans l'état du monde (`world.params()`)                |
+| `island_init` | Étape 2 : état initial de l'île sur la grille grossière, sans simulation (voir ci-dessous)     |
+
+#### `island_init`
+
+Grille de `simulation.coarse_resolution` cellules de large, cellules carrées, origine au centre.
+Avec `R` le rayon de l'île et `q = p / R`, toutes les fréquences de bruit sont en cycles par
+rayon. Chaque usage aléatoire a sa sous-seed (`"shape"`, `"topo"`, `"seafloor"`). Le
+résultat est identique au bit près pour une même seed et une même config.
+
+| Calque               | Contenu                                                                         |
+|----------------------|---------------------------------------------------------------------------------|
+| `h`                  | altitude (m), mer à `world.sea_level_y`                                         |
+| `mask`               | terre [0, 1] : smoothstep de `coast_dist` sur `shape.coast_falloff_m`           |
+| `coast_dist`         | distance signée à la côte (m, > 0 = terre) : lobes + domain warp fBm            |
+| `uplift_pattern_k`   | motif spatial de la phase tectonique k, dans [-1, 1] (taux et durée : étape 3)  |
+| `surface_material`   | matériau à la surface (`material(x, y, h)`)                                     |
+| `cum_uplift`, `sediment`, `ice` | initialisés à 0                                                      |
+| `h_initial`          | copie de `h` en fin d'étape                                                     |
+| `flags` (octets)     | bit `FIXED` sur l'anneau de bord, où `h = boundary_depth_m`                     |
+
+Le détail des algorithmes est dans [wiki/etape-2-initialisation.md](wiki/etape-2-initialisation.md).
+
+Fait (jalon 1) : masque, bathymétrie (plateau, talus, bruit du fond), topographie `flat`,
+`peneplain` et `noise`, motifs `dome` et `collision`, strates horizontales.
+À venir : cônes volcaniques (jalon 2), autres types de soulèvement (jalon 3, motif nul pour
+l'instant), plis, failles et intrusions (jalon 4).
 
 ## Architecture
 
 ```
 src/wg/                    bibliothèque "wg" (aucune dépendance au rendu)
-  core/WorldState          état du monde : calques 2D nommés + volume de voxels optionnel
+  core/WorldState          état du monde : paramètres résolus, calques 2D nommés, voxels
   core/VoxelVolume         blocs 3D en sections 16³ (copy-on-write, sections uniformes compactes)
   core/Grid2D              grille 2D générique
   core/Block               palette de blocs générique (pas de noms Minecraft)
-  core/Config              lecture/validation du JSON
+  core/Config              chargement de la config (seed + paramètres résolus)
+  params/IslandParams      structure typée de tous les paramètres + leurs distributions
+  params/ParamResolver     tirage par paramètre depuis la seed, overrides, validation
+  island/IslandLayers      noms des calques de l'île et flags de cellule
+  island/IslandGrid        géométrie de la grille grossière (origine au centre)
+  island/Geology           strates : material(z, cum_uplift, z_ref)
+  noise/Fbm                fBm OpenSimplex2 (FastNoiseLite)
   core/Random              RNG déterministe et dérivation de graines
   gen/Stage                interface d'une étape
   gen/StageParams          accès typé et validé aux paramètres d'une étape
@@ -161,12 +235,13 @@ qu'à sa fin.
 
 1. Créer `src/wg/gen/stages/MonEtape.hpp/.cpp`, une classe dérivée de `wg::Stage` :
    - le constructeur lit ses paramètres via `StageParams` (`params.get("strength", 1.0f)`) ;
-   - `run(WorldState&, const StageContext&)` lit et écrit les calques ou voxels dont elle a
-     besoin (`world.editLayer("height")`, `world.editVoxels()`...). `context.seed` est une graine
-     propre à l'étape.
-2. L'enregistrer dans `src/wg/gen/stages/BuiltinStages.cpp` : `r.add<MonEtape>("mon_etape");`
+   - `run(WorldState&, const StageContext&)` lit les paramètres (`world.params().values`, par
+     ex. `.shape.radiusRatio`), puis lit et écrit les calques ou voxels dont elle a besoin
+     (`world.editLayer("height")`, `world.editVoxels()`...). `context.seed` est une graine propre
+     à l'étape.
+2. L'enregistrer dans `src/wg/gen/stages/BuiltinStages.cpp` (`r.add<MonEtape>("mon_etape");`)
+   et l'ajouter à `defaultPipeline()` à sa place.
 3. Ajouter le `.cpp` dans `src/CMakeLists.txt`.
-4. L'insérer où on veut dans le `pipeline` du JSON.
 
 Les étapes ne se connaissent pas entre elles : elles ne partagent que des noms de calques.
 Insérer une étape `erosion` entre une étape de bruit et la voxelisation ne demande donc de
@@ -183,4 +258,5 @@ correspondent directement aux sections Minecraft.
 
 - [nlohmann/json](https://github.com/nlohmann/json) : configuration
 - [stb_image_write](https://github.com/nothings/stb) : export PNG
+- [FastNoiseLite](https://github.com/Auburn/FastNoiseLite) : bruit OpenSimplex2 / fBm
 - [raylib](https://www.raylib.com) : viewer

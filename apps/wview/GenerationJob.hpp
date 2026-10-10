@@ -3,12 +3,14 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "wg/core/Config.hpp"
 #include "wg/gen/Pipeline.hpp"
 
 enum class StageStatus { Pending, Running, Done, Failed };
@@ -25,7 +27,7 @@ struct StageSlot {
 // stage, to the UI thread.
 class GenerationJob {
 public:
-    GenerationJob(wg::Pipeline pipeline, const wg::WorldInfo& info, double previewInterval);
+    GenerationJob(wg::Pipeline pipeline, std::shared_ptr<const wg::WorldConfig> config, double previewInterval);
     ~GenerationJob(); // cancels and joins
 
     GenerationJob(const GenerationJob&) = delete;
@@ -45,7 +47,7 @@ private:
     void update(std::size_t index, StageStatus status, float progress, std::optional<wg::Snapshot> snapshot);
 
     wg::Pipeline pipeline_;
-    wg::WorldInfo info_;
+    std::shared_ptr<const wg::WorldConfig> config_;
     double previewInterval_;
     std::chrono::steady_clock::time_point start_ = std::chrono::steady_clock::now();
     std::atomic<double> endSeconds_{-1.0};

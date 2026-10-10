@@ -1,7 +1,8 @@
 #include "GenerationJob.hpp"
 
-GenerationJob::GenerationJob(wg::Pipeline pipeline, const wg::WorldInfo& info, double previewInterval)
-    : pipeline_(std::move(pipeline)), info_(info), previewInterval_(previewInterval) {
+GenerationJob::GenerationJob(wg::Pipeline pipeline, std::shared_ptr<const wg::WorldConfig> config,
+                             double previewInterval)
+    : pipeline_(std::move(pipeline)), config_(std::move(config)), previewInterval_(previewInterval) {
     for (auto& description : pipeline_.stages())
         slots_.push_back({std::move(description), StageStatus::Pending, 0.0f, std::nullopt});
 
@@ -18,7 +19,7 @@ GenerationJob::GenerationJob(wg::Pipeline pipeline, const wg::WorldInfo& info, d
         };
 
         try {
-            pipeline_.run(info_, callbacks);
+            pipeline_.run(*config_, callbacks);
         } catch (const wg::GenerationCancelled&) {
         } catch (const std::exception& e) {
             const std::lock_guard lock(mutex_);

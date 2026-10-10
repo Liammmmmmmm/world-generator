@@ -1,15 +1,17 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 #include "wg/core/Grid2D.hpp"
+#include "wg/core/LayerMeta.hpp"
 #include "wg/core/VoxelVolume.hpp"
 #include "wg/core/WorldInfo.hpp"
+#include "wg/params/IslandParams.hpp"
 
 namespace wg {
 
@@ -19,7 +21,10 @@ public:
 };
 
 // Everything the generation pipeline produces, at a given point in time:
-// - named 2D float layers ("height", later "moisture", "flow", ...),
+// - the resolved generation parameters, once the "parameters" stage ran,
+// - named 2D layers: float fields ("h", "mask", ...) with a display style, and
+//   byte layers for flags. A layer has its own size (e.g. the coarse
+//   simulation grid) and always spans the whole map,
 // - optionally the 3D block volume, once a stage has built it.
 //
 // Data is shared copy-on-write: copying a WorldState is cheap and the copy is
@@ -32,14 +37,30 @@ public:
 
     const WorldInfo& info() const { return info_; }
 
-    // --- 2D layers -----------------------------------------------------------
+    // --- Parameters (immutable once resolved) ---------------------------------
+    bool hasParams() const { return params_ != nullptr; }
+    const ResolvedParams& params() const;
+    std::shared_ptr<const ResolvedParams> paramsHandle() const { return params_; }
+    void setParams(std::shared_ptr<const ResolvedParams> params) { params_ = std::move(params); }
+
+    // --- Float layers --------------------------------------------------------
     std::vector<std::string> layerNames() const;
     bool hasLayer(std::string_view name) const;
     const Grid2D<float>& layer(std::string_view name) const;
+    const LayerMeta& layerMeta(std::string_view name) const;
     Grid2D<float>& editLayer(std::string_view name);
-    // Creates (or replaces) a width x length layer.
-    Grid2D<float>& createLayer(std::string_view name, float fill = 0.0f);
+    // Creates (or replaces) a layer of the given size.
+    Grid2D<float>& createLayer(std::string_view name, int width, int length, float fill = 0.0f, LayerMeta meta = {});
+    // Same, at the world's block resolution.
+    Grid2D<float>& createLayer(std::string_view name, float fill = 0.0f, LayerMeta meta = {});
     void removeLayer(std::string_view name);
+
+    // --- Byte layers (flags, ids) --------------------------------------------
+    std::vector<std::string> byteLayerNames() const;
+    bool hasByteLayer(std::string_view name) const;
+    const Grid2D<std::uint8_t>& byteLayer(std::string_view name) const;
+    Grid2D<std::uint8_t>& editByteLayer(std::string_view name);
+    Grid2D<std::uint8_t>& createByteLayer(std::string_view name, int width, int length, std::uint8_t fill = 0);
 
     // --- 3D blocks -----------------------------------------------------------
     bool hasVoxels() const { return voxels_ != nullptr; }
@@ -63,12 +84,28 @@ public:
     WorldState deepCopy() const;
 
 private:
-    using LayerPtr = std::shared_ptr<Grid2D<float>>;
+    template <typename T>
+    struct Layer {
+        std::string name;
+        std::shared_ptr<Grid2D<T>> data;
+        LayerMeta meta;
+    };
+    template <typename T>
+    using Layers = std::vector<Layer<T>>; // creation order
 
-    const LayerPtr* findLayer(std::string_view name) const;
+    template <typename T>
+    static const Layer<T>* find(const Layers<T>& layers, std::string_view name);
+    template <typename T>
+    static const Layer<T>& get(const Layers<T>& layers, std::string_view name);
+    template <typename T>
+    static Grid2D<T>& edit(Layers<T>& layers, std::string_view name);
+    template <typename T>
+    static Grid2D<T>& create(Layers<T>& layers, std::string_view name, int width, int length, T fill, LayerMeta meta);
 
     WorldInfo info_;
-    std::vector<std::pair<std::string, LayerPtr>> layers_; // creation order
+    std::shared_ptr<const ResolvedParams> params_;
+    Layers<float> layers_;
+    Layers<std::uint8_t> byteLayers_;
     std::shared_ptr<VoxelVolume> voxels_;
 };
 

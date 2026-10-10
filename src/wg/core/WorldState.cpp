@@ -13,47 +13,114 @@ T& makeUnique(std::shared_ptr<T>& ptr) {
     return *ptr;
 }
 
-} // namespace
-
-const WorldState::LayerPtr* WorldState::findLayer(std::string_view name) const {
-    const auto it = std::find_if(layers_.begin(), layers_.end(), [&](const auto& entry) { return entry.first == name; });
-    return it != layers_.end() ? &it->second : nullptr;
-}
-
-std::vector<std::string> WorldState::layerNames() const {
+template <typename L>
+std::vector<std::string> namesOf(const L& layers) {
     std::vector<std::string> names;
-    for (const auto& [name, _] : layers_)
-        names.push_back(name);
+    for (const auto& layer : layers)
+        names.push_back(layer.name);
     return names;
 }
 
-bool WorldState::hasLayer(std::string_view name) const {
-    return findLayer(name) != nullptr;
+} // namespace
+
+// --- Generic layer storage ---------------------------------------------------------
+
+template <typename T>
+const WorldState::Layer<T>* WorldState::find(const Layers<T>& layers, std::string_view name) {
+    const auto it = std::find_if(layers.begin(), layers.end(), [&](const auto& layer) { return layer.name == name; });
+    return it != layers.end() ? &*it : nullptr;
 }
 
-const Grid2D<float>& WorldState::layer(std::string_view name) const {
-    if (const auto* ptr = findLayer(name))
-        return **ptr;
+template <typename T>
+const WorldState::Layer<T>& WorldState::get(const Layers<T>& layers, std::string_view name) {
+    if (const auto* layer = find(layers, name))
+        return *layer;
     throw WorldError("layer '" + std::string(name) + "' does not exist (it must be created by an earlier stage)");
 }
 
-Grid2D<float>& WorldState::editLayer(std::string_view name) {
-    layer(name); // throws if missing
-    return makeUnique(*const_cast<LayerPtr*>(findLayer(name)));
+template <typename T>
+Grid2D<T>& WorldState::edit(Layers<T>& layers, std::string_view name) {
+    return makeUnique(const_cast<Layer<T>&>(get(layers, name)).data);
 }
 
-Grid2D<float>& WorldState::createLayer(std::string_view name, float fill) {
-    auto grid = std::make_shared<Grid2D<float>>(info_.width, info_.length, fill);
-    if (auto* existing = const_cast<LayerPtr*>(findLayer(name)))
-        *existing = std::move(grid);
+template <typename T>
+Grid2D<T>& WorldState::create(Layers<T>& layers, std::string_view name, int width, int length, T fill,
+                              LayerMeta meta) {
+    if (width <= 0 || length <= 0)
+        throw WorldError("layer '" + std::string(name) + "' must have a positive size");
+    auto grid = std::make_shared<Grid2D<T>>(width, length, fill);
+    if (auto* existing = const_cast<Layer<T>*>(find(layers, name)))
+        *existing = Layer<T>{existing->name, std::move(grid), std::move(meta)};
     else
-        layers_.emplace_back(std::string(name), std::move(grid));
-    return *findLayer(name)->get();
+        layers.push_back(Layer<T>{std::string(name), std::move(grid), std::move(meta)});
+    return *find(layers, name)->data;
+}
+
+// --- Parameters ----------------------------------------------------------------------
+
+const ResolvedParams& WorldState::params() const {
+    if (!params_)
+        throw WorldError("the parameters are not resolved yet (the 'parameters' stage must run first)");
+    return *params_;
+}
+
+// --- Float layers --------------------------------------------------------------------
+
+std::vector<std::string> WorldState::layerNames() const {
+    return namesOf(layers_);
+}
+
+bool WorldState::hasLayer(std::string_view name) const {
+    return find(layers_, name) != nullptr;
+}
+
+const Grid2D<float>& WorldState::layer(std::string_view name) const {
+    return *get(layers_, name).data;
+}
+
+const LayerMeta& WorldState::layerMeta(std::string_view name) const {
+    return get(layers_, name).meta;
+}
+
+Grid2D<float>& WorldState::editLayer(std::string_view name) {
+    return edit(layers_, name);
+}
+
+Grid2D<float>& WorldState::createLayer(std::string_view name, int width, int length, float fill, LayerMeta meta) {
+    return create(layers_, name, width, length, fill, std::move(meta));
+}
+
+Grid2D<float>& WorldState::createLayer(std::string_view name, float fill, LayerMeta meta) {
+    return createLayer(name, info_.width, info_.length, fill, std::move(meta));
 }
 
 void WorldState::removeLayer(std::string_view name) {
-    std::erase_if(layers_, [&](const auto& entry) { return entry.first == name; });
+    std::erase_if(layers_, [&](const auto& layer) { return layer.name == name; });
 }
+
+// --- Byte layers ---------------------------------------------------------------------
+
+std::vector<std::string> WorldState::byteLayerNames() const {
+    return namesOf(byteLayers_);
+}
+
+bool WorldState::hasByteLayer(std::string_view name) const {
+    return find(byteLayers_, name) != nullptr;
+}
+
+const Grid2D<std::uint8_t>& WorldState::byteLayer(std::string_view name) const {
+    return *get(byteLayers_, name).data;
+}
+
+Grid2D<std::uint8_t>& WorldState::editByteLayer(std::string_view name) {
+    return edit(byteLayers_, name);
+}
+
+Grid2D<std::uint8_t>& WorldState::createByteLayer(std::string_view name, int width, int length, std::uint8_t fill) {
+    return create(byteLayers_, name, width, length, fill, {});
+}
+
+// --- Voxels --------------------------------------------------------------------------
 
 const VoxelVolume& WorldState::voxels() const {
     if (!voxels_)
@@ -71,20 +138,29 @@ VoxelVolume& WorldState::createVoxels(Block fill) {
     return *voxels_;
 }
 
+// --- Identity & copies ---------------------------------------------------------------
+
 const void* WorldState::layerIdentity(std::string_view name) const {
-    const auto* ptr = findLayer(name);
-    return ptr ? ptr->get() : nullptr;
+    if (const auto* layer = find(layers_, name))
+        return layer->data.get();
+    const auto* layer = find(byteLayers_, name);
+    return layer ? layer->data.get() : nullptr;
 }
 
 std::shared_ptr<const void> WorldState::layerHandle(std::string_view name) const {
-    const auto* ptr = findLayer(name);
-    return ptr ? *ptr : nullptr;
+    if (const auto* layer = find(layers_, name))
+        return layer->data;
+    const auto* layer = find(byteLayers_, name);
+    return layer ? std::shared_ptr<const void>(layer->data) : nullptr;
 }
 
 WorldState WorldState::deepCopy() const {
     WorldState copy(info_);
-    for (const auto& [name, grid] : layers_)
-        copy.layers_.emplace_back(name, std::make_shared<Grid2D<float>>(*grid));
+    copy.params_ = params_; // immutable, safe to share
+    for (const auto& layer : layers_)
+        copy.layers_.push_back({layer.name, std::make_shared<Grid2D<float>>(*layer.data), layer.meta});
+    for (const auto& layer : byteLayers_)
+        copy.byteLayers_.push_back({layer.name, std::make_shared<Grid2D<std::uint8_t>>(*layer.data), layer.meta});
     // Copying the volume object is enough: its sections are copy-on-write and
     // only ever modified through VoxelVolume methods.
     if (voxels_)
