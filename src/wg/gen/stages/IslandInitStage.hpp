@@ -5,10 +5,9 @@
 
 namespace wg {
 
-// Step 2: builds the initial island state on the coarse grid, without any
-// simulation (no erosion, no time loop): land mask, bathymetry, initial
-// topography, uplift patterns of the tectonic phases, boundary conditions and
-// the surface material. Step 3 (uplift + erosion) starts from it.
+// Step 2: builds the initial island state on the simulation grid, without
+// any erosion: land mask, bathymetry, initial topography, boundary conditions
+// and the surface material. The erosion starts from it.
 //
 // Produces the layers listed in wg/island/IslandLayers.hpp.
 class IslandInitStage final : public Stage {

@@ -354,7 +354,7 @@ private:
                 0.25, 50.0);
             fitSection_ = false;
         }
-        const SectionKey key{state.layerHandle(wg::layers::kHeight), state.layerHandle(wg::layers::kCumUplift),
+        const SectionKey key{state.layerHandle(wg::layers::kHeight), state.layerHandle(wg::layers::kHeightInitial),
                              state.paramsHandle(), section_.x, section_.y, section_.angleDeg, section_.exaggeration,
                              static_cast<int>(rect.width), static_cast<int>(rect.height)};
         if (sectionImage_ && key == sectionKey_)
@@ -855,7 +855,7 @@ private:
     float paramsScroll_ = 0.0f;
 
     struct SectionKey {
-        std::shared_ptr<const void> heightLayer, upliftLayer, params; // kept alive: pointers stay unique
+        std::shared_ptr<const void> heightLayer, initialHeightLayer, params; // kept alive: pointers stay unique
         double x, y, angle, exaggeration;
         int width, height;
         bool operator==(const SectionKey&) const = default;

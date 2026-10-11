@@ -77,15 +77,15 @@ Les fonctions disponibles :
 | Fonction | Distribution |
 |----------|--------------|
 | `uniform(path, a, b)` | uniforme dans [a, b] |
-| `logUniform(path, a, b)` | log-uniforme : pour les grandeurs sur plusieurs ordres (K d'érosion, durées) |
+| `logUniform(path, a, b)` | log-uniforme : pour les grandeurs sur plusieurs ordres (épaisseurs de strates, longueurs d'onde) |
 | `integer(path, a, b)` | entier uniforme, bornes incluses |
 | `chance(path, p)` | booléen, vrai avec probabilité `p` |
 | `pick(path, poids, autorisés)` | choix pondéré ; l'override peut prendre toute valeur de `autorisés` |
 | `sample(path, f)` / `sampleInteger` | loi quelconque : `f(u)` transforme l'uniforme `u` |
 | `point(path, …)` | point [x, y] dans un rectangle (2 tirages du même flux) |
 
-Les **paramètres sans aléatoire** (`world.width`, `erosion.fluvial.m`…) passent par
-`number`, `whole`, `flag`, `text`, `object`... : la valeur de la config, ou un défaut fixe
+Les **paramètres sans aléatoire** (`world.width`, `simulation.resolution`…) passent par
+`number`, `whole`, `flag`, `object` : la valeur de la config, ou un défaut fixe
 (`ParamSource::Default`).
 
 ### 3.3 Dépendances entre paramètres
@@ -94,9 +94,9 @@ Une distribution peut dépendre de paramètres **déjà résolus**, et elle util
 valeur **finale** (override comprise) :
 
 ```cpp
-// la durée dépend de l'âge : une vieille île a été façonnée plus longtemps
-s.totalDurationYears = r.sample("simulation.total_duration_years",
-    [&](double u) { return logLerp(1e5, 2e7, (u + origin.age) / 2); });
+// la longueur d'onde des plis est relative au rayon de l'île
+f.wavelengthM = r.sample("geology.folding.wavelength_m",
+    [&](double u) { return radius * logLerp(0.4, 1.5, u); });
 ```
 
 Le nombre de tirages ne change pas (toujours un `u` par paramètre) ; seule la transformation
@@ -107,29 +107,23 @@ Les principales dépendances :
 
 | Paramètre | Dépend de |
 |-----------|-----------|
-| `simulation.total_duration_years` | `origin.age` (vieux = plus long) |
-| `tectonics.max_uplift_rate_m_per_year` | `origin.age` (jeune = plus actif) |
+| `initial_topography.volcano.caldera` | `origin.age` (vieux = caldeira plus probable) |
 | `initial_topography.mode`, `base_elevation_m` | `origin.type` |
-| `geology.strata[i].material`, `basement_material`, `folding.enabled`, nombre de failles et d'intrusions | `origin.type` |
-| `tectonics.phases[i].type` | `origin.type` |
-| positions et tailles des phases, failles et intrusions | rayon de l'île `R` |
+| `geology.strata[i].material`, `basement_material`, `strata_top_m`, `folding.enabled` | `origin.type` |
+| tailles du relief (volcans, plis...) | rayon de l'île `R` |
 | `shape.lobe_radius_max` | `lobe_radius_min` |
 | `shape.*` (lobes, dispersion, élongation, warp, baies, plateau, pente du talus) | `origin.type` : chaque origine a sa silhouette (voir le tableau dans `island_params.jsonc`) |
-| angle de la 1re phase `collision`, `geology.folding.axis_angle_deg` (île continentale) | `shape.main_axis_deg` : un axe principal partagé |
+| `geology.folding.axis_angle_deg` (île continentale) | `shape.main_axis_deg` : un axe principal partagé |
 | `shape.shelf_width_m` | place libre entre l'île et le bord de carte (voir 3.5) |
 | `simulation.boundary_depth_m`, `shape.talus_width_m` | place libre, plateau, `shape.talus_slope_deg` |
-| `climate.base_precipitation_m_per_year` | humidité, température |
-| `timeline.glaciation_count` | température (plus froid = plus de glaciations) |
-| `erosion.aeolian.enabled` | humidité, vent |
 | `initial_topography.volcano.crater_depth_m`, `min_spacing_m` | `height_m`, `radius_m` |
 
 L'ordre d'appel dans `resolveIslandParams` suit ces dépendances : world, origin, shape,
-simulation, bathymétrie, topographie, géologie, climat, tectonique, timeline, érosion...
+simulation, bathymétrie, topographie, géologie, climat.
 
 ### 3.4 Listes
 
-Les listes concernées : `geology.strata`, `faults`, `intrusions`, `tectonics.phases` et
-`timeline.glaciations`. Toutes passent par `listSize(liste, compteur, min, max)` :
+Les listes (aujourd'hui `geology.strata`) passent par `listSize(liste, compteur, min, max)` :
 
 | Dans la config | Nombre d'éléments |
 |----------------|-------------------|
@@ -140,10 +134,6 @@ Les listes concernées : `geology.strata`, `faults`, `intrusions`, `tectonics.ph
 Chaque champ d'élément est ensuite résolu comme un paramètre normal, avec un chemin indexé
 (`geology.strata[2].thickness_m`). Un élément de la config peut donc ne fixer que certains
 champs : `{ "material": "granite" }` fixe le matériau et tire l'épaisseur.
-
-`timeline.sea_level_curve` est un cas à part. Si elle est donnée, elle est prise telle quelle ;
-sinon elle est **dérivée** des glaciations : le niveau baisse de `sea_level_drop_m` au milieu
-de chaque glaciation.
 
 ### 3.5 Bathymétrie qui tient dans la carte
 
@@ -166,7 +156,7 @@ plausible, au lieu d'un mur à −1400 m. Si tu forces une valeur (par exemple
 
 - **Types :** un nombre attendu, un entier, un booléen, une chaîne dans une liste de choix...
   L'erreur cite le chemin, par exemple `'shape.lobe_count' must be an integer or null`.
-- **Références :** les matériaux des strates, du socle et des intrusions doivent exister dans
+- **Références :** les matériaux des strates et du socle doivent exister dans
   `geology.materials`. On peut y ajouter ses propres matériaux.
 - **Cohérence :** `world.min_y < max_y`, `lobe_count ≥ 1`, `lobe_radius_min ≤ max`...
 - **Clés inconnues.** Chaque lecture marque son chemin comme « consommé ». À la fin,
@@ -194,7 +184,7 @@ Quelques points d'usage :
 
 ## 5. Conventions d'unités
 
-- **Unités physiques :** mètres, années, degrés, °C.
+- **Unités physiques :** mètres et degrés.
 - **Fréquences de bruit :** en **cycles par rayon d'île R**. Le résultat ne dépend donc pas de
   la résolution de la grille.
 - **Coordonnées** (`x`, `y`, `center`) : en mètres, avec l'**origine au centre** de la carte.

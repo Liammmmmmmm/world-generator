@@ -13,7 +13,7 @@ struct GalleryOptions {
     int count = 16;                   // seeds (per origin with "all")
     int firstSeed = 1;
     std::optional<std::string> origin; // forced origin.type, or "all" for one group per origin
-    std::optional<int> resolution;    // overrides simulation.coarse_resolution (faster previews)
+    std::optional<int> resolution;    // overrides simulation.resolution (faster previews)
     int columns = 8;
     int thumbnail = 256;              // thumbnail width in pixels
 };

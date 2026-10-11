@@ -38,7 +38,7 @@ void generate(const GalleryOptions& options, const nlohmann::json& raw, Job& job
     if (!job.origin.empty())
         config["origin"]["type"] = job.origin;
     if (options.resolution)
-        config["simulation"]["coarse_resolution"] = *options.resolution;
+        config["simulation"]["resolution"] = *options.resolution;
 
     const auto loaded = wg::WorldConfig::fromJson(config);
     const auto snapshots = wg::Pipeline::fromConfig(loaded).run(loaded);

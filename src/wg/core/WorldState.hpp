@@ -23,7 +23,7 @@ public:
 // Everything the generation pipeline produces, at a given point in time:
 // - the resolved generation parameters, once the "parameters" stage ran,
 // - named 2D layers: float fields ("h", "mask", ...) with a display style, and
-//   byte layers for flags. A layer has its own size (e.g. the coarse
+//   byte layers for flags. A layer has its own size (e.g. the
 //   simulation grid) and always spans the whole map,
 // - optionally the 3D block volume, once a stage has built it.
 //

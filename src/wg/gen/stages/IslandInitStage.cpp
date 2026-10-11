@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
-#include <string>
 #include <vector>
 
 #include "wg/core/Random.hpp"
@@ -17,10 +16,9 @@ namespace wg {
 
 namespace {
 
-// Size of the random perturbation added to every height (m). Without it, flat
-// areas (a flat initial topography, the shelf) have no slope at all and the
-// drainage computation of step 3 degenerates there (undefined flow directions,
-// ties everywhere). 1 mm is far below anything visible.
+// Size of the random perturbation added to every height (m), so that flat
+// areas (a flat initial topography, the shelf) are never exactly flat: water
+// on them still has a direction to follow. 1 mm is far below anything visible.
 constexpr double kHeightJitterM = 1e-3;
 
 double smoothstep(double edge0, double edge1, double x) {
@@ -37,13 +35,6 @@ double lerp(double a, double b, double t) {
 // Gaussian bump, 1 at 0, with unit standard deviation.
 double gauss(double t) {
     return std::exp(-0.5 * t * t);
-}
-
-// 1 in the middle of a feature, falling to 0 at its ends (|t| = 0.5, t being
-// the position along the feature divided by its length). `falloff` is the
-// fraction of the half-length over which it falls.
-double taper(double t, double falloff) {
-    return 1.0 - smoothstep(0.5 * (1.0 - falloff), 0.5, std::abs(t));
 }
 
 // Polynomial smooth minimum: min(a, b), rounded over a band of width k.
@@ -252,19 +243,10 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
     Grid2D<float>& mask = world.createLayer(layers::kMask, grid.nx, grid.ny, 0.0f, {LayerStyle::Scalar, {}});
     Grid2D<float>& coastDist = world.createLayer(layers::kCoastDist, grid.nx, grid.ny, 0.0f, {LayerStyle::Diverging, {}});
     Grid2D<float>& lagoon = world.createLayer(layers::kLagoon, grid.nx, grid.ny, 0.0f, {LayerStyle::Scalar, {}});
-    std::vector<Grid2D<float>*> patterns;
-    for (std::size_t k = 0; k < p.tectonics.phases.size(); ++k)
-        patterns.push_back(&world.createLayer(layers::upliftPattern(static_cast<int>(k)), grid.nx, grid.ny, 0.0f,
-                                              {LayerStyle::Diverging, {}}));
-    Grid2D<float>& faultTraces =
-        world.createLayer(layers::kFaultTraces, grid.nx, grid.ny, 0.0f, {LayerStyle::Scalar, {}});
-    const Geology geology(p);
+    const Geology geology(p, &h); // volcanic strata follow the surface, final once built
     Grid2D<float>& foldOffset = world.createLayer(layers::kFoldOffset, grid.nx, grid.ny, 0.0f, {LayerStyle::Diverging, {}});
     Grid2D<float>& surfaceMaterial = world.createLayer(layers::kSurfaceMaterial, grid.nx, grid.ny, 0.0f,
                                                        {LayerStyle::Categorical, geology.materialNames()});
-    const Grid2D<float>& cumUplift = world.createLayer(layers::kCumUplift, grid.nx, grid.ny);
-    world.createLayer(layers::kSediment, grid.nx, grid.ny);
-    world.createLayer(layers::kIce, grid.nx, grid.ny);
     Grid2D<std::uint8_t>& flags = world.createByteLayer(layers::kFlags, grid.nx, grid.ny);
 
     // --- 1. Land mask, from a signed distance to the coast -------------------
@@ -594,75 +576,13 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
         }
     }
 
-    // --- 5. Uplift patterns (shape only: rate and time are applied in step 3) --
-    for (std::size_t k = 0; k < p.tectonics.phases.size(); ++k) {
-        const auto& phase = p.tectonics.phases[k];
-        Grid2D<float>& pattern = *patterns[k];
-        const double angle = phase.angleDeg * std::numbers::pi / 180.0;
-        const double ax = std::cos(angle), ay = std::sin(angle); // along the axis (u)
-
-        for (int j = 0; j < grid.ny; ++j) {
-            for (int i = 0; i < grid.nx; ++i) {
-                if (flags.at(i, j) & layers::kFixed)
-                    continue; // stays 0
-                const double dx = grid.x(i) - phase.center.x, dy = grid.y(j) - phase.center.y;
-                const double u = dx * ax + dy * ay;
-                const double v = -dx * ay + dy * ax;
-
-                double value = 0.0;
-                if (phase.type == "dome") {
-                    value = gauss(std::hypot(dx, dy) / phase.widthM);
-                } else if (phase.type == "subsidence") {
-                    value = -gauss(std::hypot(dx, dy) / phase.widthM);
-                } else if (phase.type == "collision") {
-                    value = gauss(v / phase.widthM) * taper(u / phase.lengthM, phase.falloff);
-                } else if (phase.type == "block_uplift") {
-                    value = taper(u / phase.lengthM, phase.falloff) * taper(v / phase.widthM, phase.falloff);
-                } else if (phase.type == "horst_graben") {
-                    // Bands of width width_m along the axis: +1 (horst) for even
-                    // floor(v / w), -1 (graben) for odd, switching over a narrow
-                    // band around each boundary; finite along the axis.
-                    const double band = std::floor(v / phase.widthM);
-                    const double sign = std::fmod(std::abs(band), 2.0) == 0.0 ? 1.0 : -1.0;
-                    const double toBoundary = std::min(v - band * phase.widthM, (band + 1.0) * phase.widthM - v);
-                    value = sign * smoothstep(0.0, phase.falloff * phase.widthM / 2.0, toBoundary) *
-                            taper(u / phase.lengthM, phase.falloff);
-                } else if (phase.type == "tilt") {
-                    value = std::clamp(v / phase.widthM, -1.0, 1.0);
-                }
-
-                pattern.at(i, j) = static_cast<float>(value * smoothstep(0.0, 1.0, mask.at(i, j)));
-            }
-        }
-        context.progress(static_cast<float>(lerp(0.75, 0.9, static_cast<double>(k + 1) / p.tectonics.phases.size())));
-    }
-
-    // Fault traces (validation): the cells crossed by each fault segment.
-    for (const auto& fault : p.geology.faults) {
-        const double a = fault.angleDeg * std::numbers::pi / 180.0;
-        const int steps = static_cast<int>(std::ceil(fault.lengthM / (grid.cellM / 2.0)));
-        for (int k = 0; k <= steps; ++k) {
-            const double t = (static_cast<double>(k) / std::max(steps, 1) - 0.5) * fault.lengthM;
-            const int i = static_cast<int>(std::floor((fault.x + t * std::cos(a)) / grid.cellM + grid.nx * 0.5));
-            const int j = static_cast<int>(std::floor((fault.y + t * std::sin(a)) / grid.cellM + grid.ny * 0.5));
-            if (faultTraces.contains(i, j))
-                faultTraces.at(i, j) = 1.0f;
-        }
-    }
-
-    // --- 6. Surface material -------------------------------------------------
-    // Strata reference surface: the top of the pile, or for a volcanic island
-    // the initial surface itself (lava and tuff layers parallel to the flanks).
-    // The fold displacement is a 2D field, computed once; faults and intrusions
-    // depend on depth and are evaluated in each lookup.
-    const double strataTop = sea + p.geology.strataTopM;
-    const bool volcanicStrata = p.origin.type == "volcanic";
+    // --- 5. Surface material -------------------------------------------------
+    const RowProgress materialProgress{context, 0.75, 0.95, grid.ny};
     for (int j = 0; j < grid.ny; ++j) {
+        materialProgress(j);
         for (int i = 0; i < grid.nx; ++i) {
             foldOffset.at(i, j) = static_cast<float>(geology.foldOffset(grid.x(i), grid.y(j)));
-            const double zRef = volcanicStrata ? h.at(i, j) : strataTop;
-            surfaceMaterial.at(i, j) = static_cast<float>(
-                geology.material(grid.x(i), grid.y(j), h.at(i, j), cumUplift.at(i, j), zRef, foldOffset.at(i, j)));
+            surfaceMaterial.at(i, j) = static_cast<float>(geology.material(grid.x(i), grid.y(j), h.at(i, j)));
         }
     }
 
@@ -670,7 +590,7 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
         if (!std::isfinite(value))
             throw WorldError("non-finite altitude produced by the island initialization");
 
-    // Reference surface for volcanic strata (milestone 2), and the start of step 3.
+    // Reference surface for volcanic strata, and the start of the erosion.
     world.createLayer(layers::kHeightInitial, grid.nx, grid.ny, 0.0f, {LayerStyle::Height, {}}) = h;
     context.progress(1.0f);
 }

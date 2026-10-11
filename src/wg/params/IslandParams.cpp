@@ -2,7 +2,7 @@
 //
 // Ranges noted [a, b] in island_params.jsonc are used as given; the others are
 // plausible values chosen here and can be tuned freely. Some distributions
-// depend on already-resolved parameters (mostly origin.type and origin.age):
+// depend on already-resolved parameters (mostly origin.type):
 // they use the final value, so overriding origin.type also changes what is
 // drawn for the parameters that depend on it, while the random streams
 // themselves stay the same.
@@ -141,13 +141,10 @@ void resolveOrigin(ParamResolver& r, IslandParams::Origin& o) {
     o.age = r.uniform("origin.age", 0.0, 1.0);
 }
 
-void resolveSimulation(ParamResolver& r, IslandParams::Simulation& s, const IslandParams::Origin& origin) {
-    s.coarseResolution = r.whole("simulation.coarse_resolution", 1024);
-    // Old islands have been shaped for longer.
-    s.totalDurationYears =
-        r.sample("simulation.total_duration_years", [&](double u) { return logLerp(1e5, 2e7, (u + origin.age) / 2); });
-    s.dtYears = r.logUniform("simulation.dt_years", 500, 1e4);
-    s.climateUpdateIntervalSteps = r.whole("simulation.climate_update_interval_steps", 10);
+void resolveSimulation(ParamResolver& r, IslandParams::Simulation& s) {
+    s.resolution = r.whole("simulation.resolution", 1024);
+    if (s.resolution < 2)
+        throw ConfigError("'simulation.resolution' must be >= 2");
     // boundary_depth_m depends on the island geometry: see resolveBathymetry.
 }
 
@@ -250,8 +247,6 @@ void resolveShape(ParamResolver& r, IslandParams& p) {
     });
     s.seafloorNoise.frequency = r.logUniform("shape.seafloor_noise.frequency", 0.5, 2.0);
     s.seafloorNoise.amplitudeM = r.uniform("shape.seafloor_noise.amplitude_m", 5, 40);
-    s.keepSatelliteIslets = r.flag("shape.keep_satellite_islets", true);
-    s.minIsletAreaM2 = r.number("shape.min_islet_area_m2", 2000);
 }
 
 // The sea floor goes from the shelf edge down to the boundary depth with a
@@ -366,7 +361,7 @@ void resolveInitialTopography(ParamResolver& r, IslandParams& p) {
 }
 
 void resolveGeology(ParamResolver& r, IslandParams::Geology& g, const IslandParams::Origin& origin, double radius,
-                    double mainAxisDeg, const IslandParams::Tectonics& tectonics) {
+                    double mainAxisDeg) {
     g.materials = parseMaterials(r.object("geology.materials", kDefaultMaterials));
     const auto materials = materialNames(g);
 
@@ -401,7 +396,7 @@ void resolveGeology(ParamResolver& r, IslandParams::Geology& g, const IslandPara
                                  : origin.type == "volcanic"    ? 0.1
                                                                 : 0.05;
     f.enabled = r.chance("geology.folding.enabled", foldingChance);
-    // Continental folds follow the main axis of the island (the collision that made them).
+    // Continental folds follow the main axis of the island (the orogeny that made them).
     f.axisAngleDeg = r.sample("geology.folding.axis_angle_deg",
                               [&](double u) { return origin.type == "continental" ? mainAxisDeg : 180.0 * u; });
     // Folds a few hundred meters to a couple of kilometers wide, with an
@@ -410,340 +405,19 @@ void resolveGeology(ParamResolver& r, IslandParams::Geology& g, const IslandPara
     f.amplitudeM = r.sample("geology.folding.amplitude_m", [&](double u) { return f.wavelengthM * lerp(0.03, 0.2, u); });
     f.asymmetry = r.uniform("geology.folding.asymmetry", 0, 1);
     f.plungeDeg = r.uniform("geology.folding.plunge_deg", 0, 20);
-
-    const int maxFaults = origin.type == "continental" ? 6 : origin.type == "coral" ? 1 : 4;
-    const int faultCount = r.listSize("geology.faults", "geology.fault_count", 0, maxFaults);
-    for (int i = 0; i < faultCount; ++i) {
-        IslandParams::Fault fault;
-        fault.x = r.uniform(at("geology.faults", i, "x"), -radius, radius);
-        fault.y = r.uniform(at("geology.faults", i, "y"), -radius, radius);
-        fault.angleDeg = r.uniform(at("geology.faults", i, "angle_deg"), 0, 180);
-        fault.lengthM = r.sample(at("geology.faults", i, "length_m"), [&](double u) { return radius * logLerp(0.3, 2.0, u); });
-        fault.dipDeg = r.uniform(at("geology.faults", i, "dip_deg"), 45, 90);
-        fault.offsetM = r.logUniform(at("geology.faults", i, "offset_m"), 5, 150);
-        g.faults.push_back(fault);
-    }
-
-    g.faultTipTaper = r.uniform("geology.fault_tip_taper", 0.1, 0.4);
-
-    // Continental intrusions (granite plutons) sit preferably in the collision zone.
-    const auto collision = std::find_if(tectonics.phases.begin(), tectonics.phases.end(),
-                                        [](const auto& phase) { return phase.type == "collision"; });
-    const bool inCollision = origin.type == "continental" && collision != tectonics.phases.end();
-    const int maxIntrusions = origin.type == "volcanic" || origin.type == "continental" ? 3 : 1;
-    const int intrusionCount = r.listSize("geology.intrusions", "geology.intrusion_count", 0, maxIntrusions);
-    for (int i = 0; i < intrusionCount; ++i) {
-        IslandParams::Intrusion intrusion;
-        // Volcanic islands: basaltic plugs (granite is rare on oceanic volcanoes);
-        // elsewhere mostly granite plutons.
-        intrusion.material = r.pick(at("geology.intrusions", i, "material"),
-                                    knownMaterials(origin.type == "volcanic" ? Weights{{"basalt", 1.0}}
-                                                                             : Weights{{"granite", 0.8}, {"basalt", 0.2}},
-                                                   g),
-                                    materials);
-        if (inCollision) { // within the collision belt: along its axis, close to its crest
-            const double a = collision->angleDeg * std::numbers::pi / 180.0;
-            const double u = collision->lengthM * (r.unit(at("geology.intrusions", i, "x")) - 0.5) * 0.8;
-            const double v = collision->widthM * (r.unit(at("geology.intrusions", i, "y")) - 0.5);
-            intrusion.x = r.sample(at("geology.intrusions", i, "x"),
-                                   [&](double) { return collision->center.x + u * std::cos(a) - v * std::sin(a); });
-            intrusion.y = r.sample(at("geology.intrusions", i, "y"),
-                                   [&](double) { return collision->center.y + u * std::sin(a) + v * std::cos(a); });
-        } else {
-            intrusion.x = r.uniform(at("geology.intrusions", i, "x"), -0.6 * radius, 0.6 * radius);
-            intrusion.y = r.uniform(at("geology.intrusions", i, "y"), -0.6 * radius, 0.6 * radius);
-        }
-        intrusion.radiusM = r.sample(at("geology.intrusions", i, "radius_m"), [&](double u) { return radius * lerp(0.1, 0.4, u); });
-        // Altitude of the top: on old continental crust, eroded plutons may already
-        // outcrop; elsewhere they are still buried (erosion may expose them later).
-        intrusion.topM = r.sample(at("geology.intrusions", i, "top_m"), [&](double u) {
-            return perOrigin<Range>(origin.type, {{{-200, 50}, {-100, 300}, {-300, 0}, {-300, 0}}}).at(u);
-        });
-        intrusion.domeK = r.number(at("geology.intrusions", i, "dome_k"), 0.5);
-        g.intrusions.push_back(intrusion);
-    }
 }
 
-// Faults along the edges of block_uplift and horst_graben phases, raising the
-// uplifted side by the phase's total uplift, so that strata offsets match the
-// topographic scarps.
-std::vector<IslandParams::Fault> phaseFaults(const IslandParams::TectonicPhase& phase, double radius) {
-    std::vector<IslandParams::Fault> faults;
-    const double axis = phase.angleDeg * std::numbers::pi / 180.0;
-    const double ux = std::cos(axis), uy = std::sin(axis), vx = -uy, vy = ux;
-    const double uplift = phase.rateMPerYear * (phase.endYears - phase.startYears);
-    // A trace at (u, v) in the phase frame, `angle` relative to the axis.
-    const auto add = [&](double u, double v, double angleDeg, double length, double offset) {
-        faults.push_back({phase.center.x + u * ux + v * vx, phase.center.y + u * uy + v * vy,
-                          std::fmod(phase.angleDeg + angleDeg + 360.0, 360.0), length, phase.faultDipDeg, offset});
-    };
-    if (phase.type == "block_uplift") {
-        // Positive (raised) side towards the inside of the block on all four edges.
-        add(0, phase.widthM / 2, 180, phase.lengthM, uplift);
-        add(0, -phase.widthM / 2, 0, phase.lengthM, uplift);
-        add(phase.lengthM / 2, 0, 90, phase.widthM, uplift);
-        add(-phase.lengthM / 2, 0, -90, phase.widthM, uplift);
-    } else if (phase.type == "horst_graben") {
-        // Band k covers v in [k w, (k+1) w], a horst (+1) for even k; the horst
-        // side of a boundary is raised by 2 * uplift (+U vs -U). Only boundaries
-        // whose trace crosses the island (within R of the map center) are kept.
-        const int reach = static_cast<int>(std::ceil(2.0 * radius / phase.widthM));
-        for (int k = -reach; k <= reach; ++k) {
-            add(0, k * phase.widthM, k % 2 == 0 ? 0 : 180, phase.lengthM, 2.0 * uplift);
-            const auto& f = faults.back();
-            const double a = f.angleDeg * std::numbers::pi / 180.0;
-            const double along = std::clamp(-(f.x * std::cos(a) + f.y * std::sin(a)), -f.lengthM / 2, f.lengthM / 2);
-            if (std::hypot(f.x + along * std::cos(a), f.y + along * std::sin(a)) > radius)
-                faults.pop_back();
-        }
-    }
-    return faults;
-}
-
-// Tectonics by origin: volcanic islands get at most a weak dome, sedimentary
-// and coral islands at most a weak subsidence, continental ones the full
-// palette. Block and horst edges are narrow.
-void resolveTectonics(ParamResolver& r, IslandParams& p) {
-    auto& t = p.tectonics;
-    const auto& origin = p.origin;
-    const double duration = p.simulation.totalDurationYears;
-    const double radius = p.islandRadiusM();
-    // Young islands are still actively uplifting.
-    t.maxUpliftRateMPerYear = r.sample("tectonics.max_uplift_rate_m_per_year",
-                                       [&](double u) { return logLerp(1e-5, 5e-3, (u + 1.0 - origin.age) / 2); });
-
-    const auto types = byOrigin(origin.type, {{
-                                                 {{"dome", 1.0}},
-                                                 {{"collision", 0.3}, {"horst_graben", 0.15}, {"block_uplift", 0.2},
-                                                  {"tilt", 0.15}, {"dome", 0.1}, {"subsidence", 0.1}},
-                                                 {{"subsidence", 1.0}},
-                                                 {{"subsidence", 1.0}},
-                                             }});
-    const auto [minCount, maxCount] = perOrigin<std::pair<int, int>>(origin.type, {{{0, 1}, {1, 4}, {0, 1}, {0, 1}}});
-    const Range strength = perOrigin<Range>(origin.type, {{{0.05, 0.3}, {0.2, 1.0}, {0.05, 0.3}, {0.05, 0.3}}});
-    const int count = r.listSize("tectonics.phases", "tectonics.phase_count", minCount, maxCount);
-    bool collisionSeen = false;
-    for (int i = 0; i < count; ++i) {
-        const std::string list = "tectonics.phases";
-        IslandParams::TectonicPhase phase;
-        phase.type = r.pick(at(list, i, "type"), types,
-                            {"collision", "dome", "horst_graben", "block_uplift", "tilt", "subsidence"});
-        phase.startYears = r.uniform(at(list, i, "start_years"), 0, 0.8 * duration);
-        phase.endYears = r.sample(at(list, i, "end_years"), [&](double u) {
-            return std::min(duration, phase.startYears + lerp(0.1, 0.6, u) * duration);
-        });
-        phase.rateMPerYear = r.sample(at(list, i, "rate_m_per_year"),
-                                      [&](double u) { return t.maxUpliftRateMPerYear * strength.at(u); });
-        phase.center = r.point(at(list, i, "center"), -0.6 * radius, 0.6 * radius, -0.6 * radius, 0.6 * radius);
-        // The first collision builds the island's main axis.
-        const bool mainCollision = phase.type == "collision" && !collisionSeen;
-        collisionSeen = collisionSeen || phase.type == "collision";
-        phase.angleDeg = r.sample(at(list, i, "angle_deg"), [&](double u) { return mainCollision ? p.shape.mainAxisDeg : 180.0 * u; });
-        phase.lengthM = r.sample(at(list, i, "length_m"), [&](double u) { return radius * lerp(0.8, 2.0, u); });
-        phase.widthM = r.sample(at(list, i, "width_m"), [&](double u) { return radius * lerp(0.2, 0.8, u); });
-        const bool sharp = phase.type == "block_uplift" || phase.type == "horst_graben";
-        phase.falloff = r.sample(at(list, i, "falloff"), [&](double u) { return sharp ? lerp(0.05, 0.2, u) : lerp(0.2, 1.0, u); });
-        phase.faultDipDeg = r.uniform(at(list, i, "fault_dip_deg"), 55, 80);
-        if (phase.rateMPerYear < 0.0 || phase.widthM <= 0.0 || phase.lengthM <= 0.0 || phase.falloff <= 0.0)
-            throw ConfigError("'" + at(list, i, "") + "': rate must be >= 0, width, length and falloff > 0");
-        t.phases.push_back(phase);
-    }
-
-    // Derived faults: always recomputed from the phases (a "geology.derived_faults"
-    // key in the config is ignored), listed for display only.
-    r.markConsumed("geology.derived_faults");
-    int derived = 0;
-    for (std::size_t k = 0; k < t.phases.size(); ++k) {
-        for (auto fault : phaseFaults(t.phases[k], radius)) {
-            fault.phase = static_cast<int>(k); // offset grows with the phase (step 3)
-            const std::string path = "geology.derived_faults[" + std::to_string(derived++) + "]";
-            r.record(path, {{"x", fault.x}, {"y", fault.y}, {"angle_deg", fault.angleDeg}, {"length_m", fault.lengthM},
-                            {"dip_deg", fault.dipDeg}, {"offset_m", fault.offsetM}, {"phase", k}},
-                     ParamSource::Seed);
-            p.geology.faults.push_back(fault);
-        }
-    }
-}
 
 void resolveClimate(ParamResolver& r, IslandParams::Climate& c) {
-    c.baseTemperatureC = r.uniform("climate.base_temperature_c", -10, 30);
-    c.lapseRateCPerKm = r.number("climate.lapse_rate_c_per_km", 6.5);
     c.humidity = r.uniform("climate.humidity", 0, 1);
-    // Wetter with humidity, and warmer air holds more water.
-    c.basePrecipitationMPerYear = r.sample("climate.base_precipitation_m_per_year", [&](double u) {
-        const double warmth = std::clamp((c.baseTemperatureC + 10.0) / 40.0, 0.0, 1.0);
-        return lerp(0.1, 3.5, c.humidity * (0.6 + 0.4 * warmth)) * lerp(0.75, 1.25, u);
-    });
     c.wind.directionDeg = r.uniform("climate.wind.direction_deg", 0, 360);
     c.wind.strength = r.uniform("climate.wind.strength", 0, 1);
     c.wind.variabilityDeg = r.uniform("climate.wind.variability_deg", 5, 60);
-    // Swell mostly follows the dominant wind.
-    c.swell.directionDeg = r.sample("climate.swell.direction_deg", [&](double u) {
-        return std::fmod(c.wind.directionDeg + lerp(-45, 45, u) + 360.0, 360.0);
-    });
-    c.swell.energy = r.uniform("climate.swell.energy", 0, 1);
-    c.orographic.condensationRate = r.uniform("climate.orographic.condensation_rate", 0.2, 1.0);
-    c.orographic.rainShadowStrength = r.uniform("climate.orographic.rain_shadow_strength", 0.2, 0.9);
-    c.orographic.moistureRechargeOverSea = r.uniform("climate.orographic.moisture_recharge_over_sea", 0.05, 0.5);
-}
-
-void resolveTimeline(ParamResolver& r, IslandParams::Timeline& t, const IslandParams::Climate& climate,
-                     const IslandParams::Simulation& sim) {
-    const double duration = sim.totalDurationYears;
-    // Colder climates see more glaciations.
-    const double coldness = std::clamp((20.0 - climate.baseTemperatureC) / 30.0, 0.0, 1.0);
-    const int maxGlaciations = static_cast<int>(std::lround(1 + 3 * coldness));
-    const int count = r.listSize("timeline.glaciations", "timeline.glaciation_count", 0, maxGlaciations);
-    for (int i = 0; i < count; ++i) {
-        const std::string list = "timeline.glaciations";
-        IslandParams::Glaciation g;
-        g.startYears = r.uniform(at(list, i, "start_years"), 0, 0.9 * duration);
-        g.endYears = r.sample(at(list, i, "end_years"),
-                              [&](double u) { return std::min(duration, g.startYears + lerp(0.02, 0.15, u) * duration); });
-        g.temperatureOffsetC = r.uniform(at(list, i, "temperature_offset_c"), -12, -3);
-        g.seaLevelDropM = r.uniform(at(list, i, "sea_level_drop_m"), 60, 130);
-        t.glaciations.push_back(g);
-    }
-
-    if (const nlohmann::json* curve = r.configList("timeline.sea_level_curve")) {
-        for (std::size_t i = 0; i < curve->size(); ++i) {
-            const auto& p = (*curve)[i];
-            if (!p.is_object() || !p.contains("t_years") || !p.contains("level_m") || !p["t_years"].is_number() ||
-                !p["level_m"].is_number())
-                throw ConfigError("'timeline.sea_level_curve[" + std::to_string(i) +
-                                  "]' must be { \"t_years\": <number>, \"level_m\": <number> }");
-            t.seaLevelCurve.push_back({p["t_years"].get<double>(), p["level_m"].get<double>()});
-        }
-        std::sort(t.seaLevelCurve.begin(), t.seaLevelCurve.end(),
-                  [](const auto& a, const auto& b) { return a.tYears < b.tYears; });
-        r.record("timeline.sea_level_curve", *curve, ParamSource::Config);
-        return;
-    }
-
-    // Derived from the glaciations: sea level drops to a low stand mid-glaciation.
-    t.seaLevelCurve.push_back({0.0, 0.0});
-    for (const auto& g : t.glaciations) {
-        t.seaLevelCurve.push_back({g.startYears, 0.0});
-        t.seaLevelCurve.push_back({(g.startYears + g.endYears) / 2, -g.seaLevelDropM});
-        t.seaLevelCurve.push_back({g.endYears, 0.0});
-    }
-    t.seaLevelCurve.push_back({duration, 0.0});
-    std::sort(t.seaLevelCurve.begin(), t.seaLevelCurve.end(),
-              [](const auto& a, const auto& b) { return a.tYears < b.tYears; });
-    nlohmann::json curve = nlohmann::json::array();
-    for (const auto& p : t.seaLevelCurve)
-        curve.push_back({{"t_years", p.tYears}, {"level_m", p.levelM}});
-    r.record("timeline.sea_level_curve", curve, ParamSource::Seed);
-}
-
-void resolveErosion(ParamResolver& r, IslandParams::Erosion& e, const IslandParams::Climate& climate,
-                    const IslandParams::World& world) {
-    auto& fl = e.fluvial;
-    fl.kBase = r.logUniform("erosion.fluvial.k_base", 1e-6, 1e-4);
-    fl.m = r.number("erosion.fluvial.m", 0.45);
-    fl.n = r.number("erosion.fluvial.n", 1.0);
-    fl.depositionG = r.uniform("erosion.fluvial.deposition_g", 0, 2);
-    fl.precipitationWeighted = r.flag("erosion.fluvial.precipitation_weighted", true);
-
-    e.hillslope.diffusivityM2PerYear = r.logUniform("erosion.hillslope.diffusivity_m2_per_year", 1e-3, 1e-1);
-
-    e.thermal.iterationsPerStep = r.whole("erosion.thermal.iterations_per_step", 1);
-    e.thermal.rate = r.uniform("erosion.thermal.rate", 0.05, 0.5);
-
-    auto& gl = e.glacial;
-    gl.accumulationRate = r.uniform("erosion.glacial.accumulation_rate", 0.1, 2.0);
-    gl.ablationGradient = r.uniform("erosion.glacial.ablation_gradient", 0.002, 0.01);
-    gl.deformationCoeff = r.logUniform("erosion.glacial.deformation_coeff", 5e-17, 5e-16);
-    gl.slidingCoeff = r.logUniform("erosion.glacial.sliding_coeff", 1e-4, 1e-2);
-    gl.erosionCoeff = r.logUniform("erosion.glacial.erosion_coeff", 1e-5, 1e-3);
-    gl.erosionExponent = r.number("erosion.glacial.erosion_exponent", 1.0);
-
-    auto& co = e.coastal;
-    co.waveErosionCoeff = r.logUniform("erosion.coastal.wave_erosion_coeff", 1e-5, 1e-3);
-    co.fetchRayCount = r.whole("erosion.coastal.fetch_ray_count", 32);
-    co.fetchMaxDistanceM = r.uniform("erosion.coastal.fetch_max_distance_m", 2000, 20000);
-    co.platformDepthM = r.uniform("erosion.coastal.platform_depth_m", -15, -3);
-    co.sedimentExportThreshold = r.uniform("erosion.coastal.sediment_export_threshold", 0.3, 0.9);
-
-    auto& dh = e.detailHydraulic;
-    dh.method = r.text("erosion.detail_hydraulic.method", "droplet", {"droplet", "pipe"});
-    const double area = static_cast<double>(world.width) * world.length;
-    dh.dropletCount = r.sampleInteger("erosion.detail_hydraulic.droplet_count",
-                                      [&](double u) { return static_cast<int>(std::lround(area * lerp(0.05, 0.3, u))); });
-    dh.inertia = r.number("erosion.detail_hydraulic.inertia", 0.05);
-    dh.capacity = r.number("erosion.detail_hydraulic.capacity", 4.0);
-    dh.erosionRate = r.number("erosion.detail_hydraulic.erosion_rate", 0.3);
-    dh.depositionRate = r.number("erosion.detail_hydraulic.deposition_rate", 0.3);
-    dh.evaporation = r.number("erosion.detail_hydraulic.evaporation", 0.01);
-    dh.radius = r.whole("erosion.detail_hydraulic.radius", 3);
-    dh.maxLifetime = r.whole("erosion.detail_hydraulic.max_lifetime", 64);
-
-    auto& ae = e.aeolian;
-    // Dunes need dry air and wind.
-    ae.enabled = r.chance("erosion.aeolian.enabled",
-                          std::clamp(0.6 * (1.0 - climate.humidity) + 0.3 * climate.wind.strength, 0.0, 1.0));
-    ae.sandSupply = r.uniform("erosion.aeolian.sand_supply", 0, 1);
-    ae.iterations = r.integer("erosion.aeolian.iterations", 50, 400);
-    ae.slabHeightM = r.number("erosion.aeolian.slab_height_m", 0.2);
-    ae.hopLengthM = r.uniform("erosion.aeolian.hop_length_m", 1, 5);
-    ae.depositProbSand = r.number("erosion.aeolian.deposit_prob_sand", 0.6);
-    ae.depositProbBare = r.number("erosion.aeolian.deposit_prob_bare", 0.4);
-    ae.reposeAngleDeg = r.number("erosion.aeolian.repose_angle_deg", 34);
-    ae.shadowAngleDeg = r.number("erosion.aeolian.shadow_angle_deg", 15);
-}
-
-void resolveHydrology(ParamResolver& r, IslandParams::Hydrology& h) {
-    h.riverMinAreaM2 = r.logUniform("hydrology.river_min_area_m2", 2e4, 5e5);
-    h.widthCoeff = r.uniform("hydrology.width_coeff", 0.002, 0.02);
-    h.widthExponent = r.number("hydrology.width_exponent", 0.5);
-    h.depthCoeff = r.uniform("hydrology.depth_coeff", 0.002, 0.015);
-    h.depthExponent = r.number("hydrology.depth_exponent", 0.4);
-    h.lakeMinAreaM2 = r.logUniform("hydrology.lake_min_area_m2", 500, 2e4);
-    h.waterfallMinDropBlocks = r.whole("hydrology.waterfall_min_drop_blocks", 2);
-}
-
-void resolveRest(ParamResolver& r, IslandParams& p) {
-    auto& pc = p.presentClimate;
-    pc.temperatureOffsetC = r.number("present_climate.temperature_offset_c", 0.0);
-    pc.glacierMinThicknessM = r.uniform("present_climate.glacier_min_thickness_m", 5, 30);
-    pc.snowMinAltitudeOffsetM = r.number("present_climate.snow_min_altitude_offset_m", 0.0);
-
-    p.soil.formationRate = r.logUniform("soil.formation_rate", 1e-5, 1e-3);
-    p.soil.maxDepthM = r.uniform("soil.max_depth_m", 0.5, 3.0);
-    p.soil.slopeLimitDeg = r.uniform("soil.slope_limit_deg", 30, 45);
-
-    p.biomes.transitionNoise.frequency = r.logUniform("biomes.transition_noise.frequency", 1, 10);
-    p.biomes.transitionNoise.amplitude = r.uniform("biomes.transition_noise.amplitude", 0.05, 0.3);
-    p.biomes.table = r.raw("biomes.table");
-
-    auto& v = p.voxelization;
-    v.surfaceMaterialBySlope = r.flag("voxelization.surface_material_by_slope", true);
-    v.strataJitterM = r.uniform("voxelization.strata_jitter_m", 0, 5);
-    v.overhangs.enabled = r.flag("voxelization.overhangs.enabled", true);
-    v.overhangs.minSlopeDeg = r.number("voxelization.overhangs.min_slope_deg", 60);
-    v.overhangs.noiseFrequency = r.logUniform("voxelization.overhangs.noise_frequency", 25, 125);
-    v.overhangs.depthBlocks = r.integer("voxelization.overhangs.depth_blocks", 1, 4);
-    v.seaNotches.enabled = r.flag("voxelization.sea_notches.enabled", true);
-    v.seaNotches.minExposure = r.uniform("voxelization.sea_notches.min_exposure", 0.4, 0.8);
-    v.seaNotches.heightBlocks = r.integer("voxelization.sea_notches.height_blocks", 1, 3);
-    v.seaNotches.depthBlocks = r.integer("voxelization.sea_notches.depth_blocks", 1, 4);
-
-    p.caves.enabled = r.flag("caves.enabled", false);
-    p.vegetation.enabled = r.flag("vegetation.enabled", false);
-    p.structures.enabled = r.flag("structures.enabled", false);
-
-    p.debug.stopAfterStage = r.optionalText("debug.stop_after_stage");
-    p.debug.dumpStages = r.textList("debug.dump_stages");
-    p.debug.cacheDir = r.text("debug.cache_dir", "./cache");
-    p.debug.forceRecomputeFrom = r.optionalText("debug.force_recompute_from");
 }
 
 // Top-level order of the resolved JSON (matches island_params.jsonc).
 constexpr std::array kSectionOrder{
-    "seed",      "world",      "simulation", "origin",          "shape",   "initial_topography",
-    "geology",   "tectonics",  "climate",    "timeline",        "erosion", "hydrology",
-    "present_climate", "soil", "biomes",     "voxelization",    "caves",   "vegetation",
-    "structures", "debug",
+    "seed", "world", "simulation", "origin", "shape", "initial_topography", "geology", "climate",
 };
 
 } // namespace
@@ -764,16 +438,11 @@ ResolvedParams resolveIslandParams(std::uint64_t seed, const nlohmann::json& con
     resolveWorld(r, p.world);
     resolveOrigin(r, p.origin);
     resolveShape(r, p);
-    resolveSimulation(r, p.simulation, p.origin);
+    resolveSimulation(r, p.simulation);
     resolveBathymetry(r, p);
     resolveInitialTopography(r, p);
-    resolveTectonics(r, p); // before geology: intrusions follow the collision, derived faults
-    resolveGeology(r, p.geology, p.origin, p.islandRadiusM(), p.shape.mainAxisDeg, p.tectonics);
+    resolveGeology(r, p.geology, p.origin, p.islandRadiusM(), p.shape.mainAxisDeg);
     resolveClimate(r, p.climate);
-    resolveTimeline(r, p.timeline, p.climate, p.simulation);
-    resolveErosion(r, p.erosion, p.climate, p.world);
-    resolveHydrology(r, p.hydrology);
-    resolveRest(r, p);
     r.checkNoUnknownKeys();
 
     // Display order: by section in file order, resolution order within a section.

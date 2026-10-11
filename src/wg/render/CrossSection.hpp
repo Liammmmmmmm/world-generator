@@ -36,8 +36,8 @@ bool canRenderCrossSection(const WorldState& state);
 // depth below the lowest point) in an image of this size.
 double fitCrossSectionExaggeration(const WorldState& state, const CrossSection& section, int width, int height);
 
-// Rock in place along the section, from the geology lookup (strata, folds,
-// faults, intrusions, uplift), below the surface "h".
+// Rock in place along the section, from the geology lookup (strata and
+// folds), below the surface "h".
 CrossSectionImage renderCrossSection(const WorldState& state, const CrossSection& section, int width, int height);
 
 } // namespace wg

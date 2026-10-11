@@ -8,7 +8,7 @@ notice d'utilisation (build, commandes, contrôles du viewer).
 |------|---------|
 | [Vue d'ensemble](README.md) (cette page) | Architecture, flux de données, concepts transverses |
 | [Étape 1 : paramètres](etape-1-parametres.md) | Lecture de la config, tirage depuis la seed, overrides, validation |
-| [Étape 2 : initialisation de l'île](etape-2-initialisation.md) | Masque, bathymétrie, topographie, soulèvement, géologie |
+| [Étape 2 : initialisation de l'île](etape-2-initialisation.md) | Masque, bathymétrie, topographie, géologie |
 
 ---
 
@@ -16,9 +16,8 @@ notice d'utilisation (build, commandes, contrôles du viewer).
 
 On génère un monde **fini** (une île sur une carte de `world.width × world.length` blocs),
 d'un seul tenant plutôt que chunk par chunk. Ça permet des traitements globaux impossibles en
-génération infinie : érosion, drainage, climat... Le monde est d'abord simulé en 2D
-(altitudes, masques, champs physiques) sur une grille grossière, puis il sera transformé en
-blocs 3D. Rien n'est propre à Minecraft : les exporteurs traduiront le résultat vers chaque
+génération infinie, comme l'érosion. Le monde est d'abord simulé en 2D (altitudes, masques,
+champs physiques) sur une grille de simulation, puis il sera transformé en blocs 3D. Rien n'est propre à Minecraft : les exporteurs traduiront le résultat vers chaque
 format.
 
 La génération est une suite d'**étapes** (le *pipeline*). Chacune lit l'état produit par les
@@ -66,8 +65,8 @@ src/wg/                       bibliothèque "wg", sans dépendance au rendu
     stages/        les étapes : ParametersStage, IslandInitStage, BuiltinStages.cpp (registre)
   island/
     IslandLayers   noms des calques de l'île et flags de cellule (contrat entre étapes)
-    IslandGrid     géométrie de la grille grossière (taille, cellule, coordonnées)
-    Geology        pile de strates → material(z, cum_uplift, z_ref)
+    IslandGrid     géométrie de la grille de simulation (taille, cellule, coordonnées)
+    Geology        strates et plis → material(x, y, z)
   noise/Fbm        bruit fractal OpenSimplex2 (FastNoiseLite)
   render/          vues, palettes, rendu 2D (partagé par le PNG et le viewer)
   io/              format natif .wgw, export PNG
@@ -90,7 +89,7 @@ tests/main.cpp     tests unitaires (sans framework)
 | Calques d'octets (`flags`) | `byteLayer`, `editByteLayer`, `createByteLayer` | étapes 2D |
 | Volume de voxels | `voxels()`, `editVoxels()`, `createVoxels()` | voxelisation (à venir) |
 
-Un calque a sa propre taille (la grille grossière 1024², par exemple) et couvre toujours toute
+Un calque a sa propre taille (la grille de simulation 1024², par exemple) et couvre toujours toute
 la carte. Le viewer l'étire sur le monde, et `cellSizeM()` donne la taille d'une cellule en
 mètres.
 

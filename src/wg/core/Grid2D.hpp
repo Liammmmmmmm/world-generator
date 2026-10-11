@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <span>
 #include <vector>
@@ -47,5 +48,17 @@ private:
     int length_ = 0;
     std::vector<T> data_;
 };
+
+// Bilinear sample of a grid covering a widthM x lengthM rectangle centered on
+// the origin (cell centers at the middle of each cell), at (x, y) meters.
+inline float sampleCentered(const Grid2D<float>& grid, double x, double y, double widthM, double lengthM) {
+    const double fx = (x / widthM + 0.5) * grid.width() - 0.5;
+    const double fy = (y / lengthM + 0.5) * grid.length() - 0.5;
+    const int i = static_cast<int>(std::floor(fx)), j = static_cast<int>(std::floor(fy));
+    const auto tx = static_cast<float>(fx - i), ty = static_cast<float>(fy - j);
+    const float top = grid.atClamped(i, j) * (1 - tx) + grid.atClamped(i + 1, j) * tx;
+    const float bottom = grid.atClamped(i, j + 1) * (1 - tx) + grid.atClamped(i + 1, j + 1) * tx;
+    return top * (1 - ty) + bottom * ty;
+}
 
 } // namespace wg

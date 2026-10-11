@@ -7,8 +7,8 @@
 
 namespace wg {
 
-// Geometry of the coarse simulation grid: simulation.coarse_resolution cells
-// across the map width, square cells, origin at the map center.
+// Geometry of the simulation grid: simulation.resolution cells across the map
+// width, square cells, origin at the map center.
 struct IslandGrid {
     int nx = 0;
     int ny = 0;
@@ -16,8 +16,8 @@ struct IslandGrid {
     double radiusM = 0.0; // island radius R
 
     explicit IslandGrid(const IslandParams& params)
-        : nx(params.simulation.coarseResolution),
-          cellM(params.world.width * params.world.blockSizeM / params.simulation.coarseResolution),
+        : nx(params.simulation.resolution),
+          cellM(params.world.width * params.world.blockSizeM / params.simulation.resolution),
           radiusM(params.islandRadiusM()) {
         ny = std::max(1, static_cast<int>(std::lround(params.world.length * params.world.blockSizeM / cellM)));
     }

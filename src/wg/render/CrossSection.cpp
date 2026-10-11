@@ -13,17 +13,6 @@ namespace wg {
 
 namespace {
 
-// Bilinear sample of a layer covering the whole map, at (x, y) meters from the center.
-float sample(const Grid2D<float>& grid, double x, double y, double widthM, double lengthM) {
-    const double fx = (x / widthM + 0.5) * grid.width() - 0.5;
-    const double fy = (y / lengthM + 0.5) * grid.length() - 0.5;
-    const int i = static_cast<int>(std::floor(fx)), j = static_cast<int>(std::floor(fy));
-    const auto tx = static_cast<float>(fx - i), ty = static_cast<float>(fy - j);
-    const float top = grid.atClamped(i, j) * (1 - tx) + grid.atClamped(i + 1, j) * tx;
-    const float bottom = grid.atClamped(i, j + 1) * (1 - tx) + grid.atClamped(i + 1, j + 1) * tx;
-    return top * (1 - ty) + bottom * ty;
-}
-
 struct Line {
     double tMin = 0.0, tMax = 0.0, dx = 1.0, dy = 0.0;
 };
@@ -57,7 +46,7 @@ double fitCrossSectionExaggeration(const WorldState& state, const CrossSection& 
     double lowest = sea, highest = sea;
     for (int c = 0; c < width; ++c) {
         const double t = line.tMin + (c + 0.5) * (line.tMax - line.tMin) / width;
-        const double z = sample(h, section.x + t * line.dx, section.y + t * line.dy, widthM, lengthM);
+        const double z = sampleCentered(h, section.x + t * line.dx, section.y + t * line.dy, widthM, lengthM);
         lowest = std::min(lowest, z), highest = std::max(highest, z);
     }
     // The relief, plus a quarter of it below the lowest point to show the rock.
@@ -71,14 +60,11 @@ bool canRenderCrossSection(const WorldState& state) {
 }
 
 CrossSectionImage renderCrossSection(const WorldState& state, const CrossSection& section, int width, int height) {
-    const auto& params = state.params().values;
-    const Geology geology(params);
+    const auto* hInitial = state.hasLayer(layers::kHeightInitial) ? &state.layer(layers::kHeightInitial) : nullptr;
+    const Geology geology(state.params().values, hInitial);
     const double widthM = state.info().widthM(), lengthM = state.info().lengthM();
     const double sea = state.info().seaLevelM();
     const auto& h = state.layer(layers::kHeight);
-    const auto* cumUplift = state.hasLayer(layers::kCumUplift) ? &state.layer(layers::kCumUplift) : nullptr;
-    const auto* hInitial = state.hasLayer(layers::kHeightInitial) ? &state.layer(layers::kHeightInitial) : nullptr;
-    const bool volcanicStrata = params.origin.type == "volcanic" && hInitial;
 
     const Line line = clipLine(section, widthM, lengthM);
     const double tMin = line.tMin, tMax = line.tMax, dx = line.dx, dy = line.dy;
@@ -98,17 +84,13 @@ CrossSectionImage renderCrossSection(const WorldState& state, const CrossSection
     for (int c = 0; c < width; ++c) {
         const double t = tMin + (c + 0.5) * out.metersPerPixelX;
         px[c] = section.x + t * dx, py[c] = section.y + t * dy;
-        surface[c] = sample(h, px[c], py[c], widthM, lengthM);
+        surface[c] = sampleCentered(h, px[c], py[c], widthM, lengthM);
         highest = std::max(highest, surface[c]);
     }
     out.zTop = highest + 0.08 * height * out.metersPerPixelZ;
 
     const Rgb water = blockInfo(Block::Water).color;
-    const double strataTop = sea + params.geology.strataTopM;
     for (int c = 0; c < width; ++c) {
-        const double uplift = cumUplift ? sample(*cumUplift, px[c], py[c], widthM, lengthM) : 0.0;
-        const double zRef = volcanicStrata ? sample(*hInitial, px[c], py[c], widthM, lengthM) : strataTop;
-        const double fold = geology.foldOffset(px[c], py[c]);
         for (int r = 0; r < height; ++r) {
             const double z = out.zTop - (r + 0.5) * out.metersPerPixelZ;
             const std::size_t k = static_cast<std::size_t>(r) * width + c;
@@ -118,7 +100,7 @@ CrossSectionImage renderCrossSection(const WorldState& state, const CrossSection
                     continue; // air: transparent
                 color = water;
             } else {
-                const int id = geology.material(px[c], py[c], z, uplift, zRef, fold);
+                const int id = geology.material(px[c], py[c], z);
                 out.materials[k] = static_cast<std::int16_t>(id);
                 color = materialColor(out.materialNames[id]);
                 if (surface[c] - z < out.metersPerPixelZ * 1.5) // outline the ground surface

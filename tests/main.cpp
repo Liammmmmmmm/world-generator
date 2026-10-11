@@ -153,10 +153,11 @@ void testParamsOverrideDoesNotShiftOthers() {
     // Unrelated parameters keep their value.
     CHECK(overridden.values.shape.lobeCount == base.values.shape.lobeCount);
     CHECK(overridden.values.shape.lobeSpread == base.values.shape.lobeSpread);
-    CHECK(overridden.values.simulation.dtYears == base.values.simulation.dtYears);
-    CHECK(overridden.values.erosion.fluvial.kBase == base.values.erosion.fluvial.kBase);
-    // Dependent parameters follow the override (precipitation depends on humidity).
-    CHECK(overridden.values.climate.basePrecipitationMPerYear != base.values.climate.basePrecipitationMPerYear);
+    CHECK(overridden.values.climate.wind.directionDeg == base.values.climate.wind.directionDeg);
+    CHECK(overridden.values.geology.folding.asymmetry == base.values.geology.folding.asymmetry);
+    // Dependent parameters follow the override (sizes are relative to the island radius).
+    CHECK(base.values.shape.radiusRatio != 0.5);
+    CHECK(overridden.values.initialTopography.volcano.radiusM != base.values.initialTopography.volcano.radiusM);
 }
 
 void testParamsDependencies() {
@@ -182,8 +183,8 @@ void testParamsLists() {
     CHECK(partial.values.geology.strata[0].thicknessM == base.values.geology.strata[0].thicknessM);
     CHECK(partial.values.geology.strata[1].thicknessM == 12.5);
 
-    const auto counted = resolve({{"seed", 5}, {"geology", {{"fault_count", 3}}}});
-    CHECK(entry(counted, "geology.fault_count")->value == 3); // plus faults derived from the tectonic phases
+    const auto counted = resolve({{"seed", 5}, {"geology", {{"strata_count", 3}}}});
+    CHECK(entry(counted, "geology.strata_count")->value == 3 && counted.values.geology.strata.size() == 3);
 
     CHECK(throws<wg::ConfigError>([] {
         resolve({{"seed", 5}, {"geology", {{"strata_count", 4}, {"strata", {{{"material", "granite"}}}}}}});
@@ -210,14 +211,14 @@ void testParamsRoundTrip() {
     const auto original = resolve({{"seed", 11}});
     const auto replayed = resolve(nlohmann::json::parse(original.toJson().dump()));
     CHECK(replayed.toJson() == original.toJson());
-    for (const auto& e : replayed.entries) // only null values (e.g. biomes.table) stay defaults
-        CHECK(e.source == wg::ParamSource::Config || e.value.is_null());
+    for (const auto& e : replayed.entries)
+        CHECK(e.source == wg::ParamSource::Config);
 }
 
 void testIslandParamsFile() {
     const auto config = wg::WorldConfig::load(WG_SOURCE_DIR "/island_params.jsonc");
     CHECK(config.seed == config.raw["seed"].get<std::uint64_t>() && config.info().width == 4096);
-    CHECK(config.island().erosion.fluvial.m == 0.45);
+    CHECK(config.island().simulation.resolution == 1024);
     CHECK(config.island().geology.materials.at("shale").erodibility == 2.0);
 }
 
@@ -304,8 +305,7 @@ std::vector<wg::Snapshot> runIsland(nlohmann::json config) {
 void testIslandInit() {
     const nlohmann::json config = {{"seed", 9},
                                    {"world", {{"width", 512}, {"length", 512}}},
-                                   {"simulation", {{"coarse_resolution", 128}}},
-                                   {"tectonics", {{"phases", {{{"type", "dome"}}, {{"type", "collision"}}}}}}};
+                                   {"simulation", {{"resolution", 128}}}};
     const auto snapshots = runIsland(config);
     CHECK(snapshots.size() == 2 && snapshots[1].stageName == "island_init");
     const auto& state = snapshots[1].state;
@@ -335,13 +335,6 @@ void testIslandInit() {
     CHECK(state.layer(wg::layers::kMask).at(2, 2) == 0.0f);
     CHECK(state.layer(wg::layers::kHeightInitial).data()[100] == h.data()[100]);
 
-    // Uplift patterns: one per phase, in [-1, 1], 0 on the border.
-    for (int k = 0; k < 2; ++k) {
-        const auto [min, max] = wg::valueRange(state.layer(wg::layers::upliftPattern(k)));
-        CHECK(min >= -1.0f && max <= 1.0f && max > 0.0f);
-        CHECK(state.layer(wg::layers::upliftPattern(k)).at(0, 50) == 0.0f);
-    }
-
     // Bit-for-bit deterministic.
     const auto again = runIsland(config);
     for (const auto& name : state.layerNames()) {
@@ -356,7 +349,7 @@ void testIslandFitsInMap() {
     for (int seed = 1; seed <= 20; ++seed) {
         const auto snapshots = runIsland({{"seed", seed},
                                           {"world", {{"width", 1024}, {"length", 1024}}},
-                                          {"simulation", {{"coarse_resolution", 128}}}});
+                                          {"simulation", {{"resolution", 128}}}});
         const auto& state = snapshots[1].state;
         const auto& p = state.params().values;
         const auto& h = state.layer(wg::layers::kHeight);
@@ -400,7 +393,7 @@ void testShapeByOrigin() {
     const auto island = [](int seed, const char* origin) {
         return runIsland({{"seed", seed},
                           {"world", {{"width", 1024}, {"length", 1024}}},
-                          {"simulation", {{"coarse_resolution", 128}}},
+                          {"simulation", {{"resolution", 128}}},
                           {"origin", {{"type", origin}}}})[1]
             .state;
     };
@@ -438,7 +431,7 @@ void testAtoll() {
     const auto atoll = [](int seed, double passFraction) {
         return runIsland({{"seed", seed},
                           {"world", {{"width", 2048}, {"length", 2048}}},
-                          {"simulation", {{"coarse_resolution", 256}}},
+                          {"simulation", {{"resolution", 256}}},
                           {"origin", {{"type", "coral"}}},
                           {"shape", {{"ring_pass_fraction", passFraction}}}})[1]
             .state;
@@ -459,14 +452,14 @@ void testAtoll() {
     }
 }
 
-// Geology without folds, faults or intrusions: only the strata.
-const nlohmann::json kPlainGeology = {{"folding", {{"enabled", false}}}, {"fault_count", 0}, {"intrusion_count", 0}};
+// Geology without folds: only the strata.
+const nlohmann::json kPlainGeology = {{"folding", {{"enabled", false}}}};
 
 wg::WorldState islandOf(int seed, const char* origin, nlohmann::json topography = nlohmann::json::object(),
                         nlohmann::json geology = nlohmann::json::object()) {
     return runIsland({{"seed", seed},
                       {"world", {{"width", 2048}, {"length", 2048}}},
-                      {"simulation", {{"coarse_resolution", 256}}},
+                      {"simulation", {{"resolution", 256}}},
                       {"origin", {{"type", origin}}},
                       {"initial_topography", topography},
                       {"geology", geology}})[1]
@@ -492,8 +485,7 @@ void testTopographyByOrigin() {
             if (coast.data()[k] > 0.0f && coast.data()[k] < band)
                 coastalMax = std::max(coastalMax, vh.data()[k]);
         CHECK(coastalMax < 0.5f * vMax + vp.baseElevationM + vp.volcano.flankNoiseM + vp.volcano.lavaFlowHeightM);
-        // Strata parallel to the surface: the top layer everywhere (without
-        // intrusions, which may outcrop).
+        // Strata parallel to the surface: the top layer everywhere.
         const auto plain = islandOf(seed, "volcanic", nlohmann::json::object(), kPlainGeology);
         const auto& material = plain.layer(wg::layers::kSurfaceMaterial);
         CHECK(std::all_of(material.data().begin(), material.data().end(),
@@ -525,84 +517,16 @@ void testTopographyByOrigin() {
     }
 }
 
-void testUpliftPatterns() {
-    using J = nlohmann::json;
-    const J phase = {{"center", {0, 0}}, {"angle_deg", 0}, {"length_m", 300}, {"width_m", 100}, {"falloff", 0.1}};
-    J phases = J::array();
-    for (const char* type : {"block_uplift", "horst_graben", "tilt", "subsidence"}) {
-        J p = phase;
-        p["type"] = type;
-        phases.push_back(p);
-    }
-    // A big round flat island so that the mask is 1 around the center.
-    const auto state = runIsland({{"seed", 2},
-                                  {"world", {{"width", 1024}, {"length", 1024}}},
-                                  {"simulation", {{"coarse_resolution", 256}}},
-                                  {"origin", {{"type", "volcanic"}}},
-                                  {"shape", {{"lobe_count", 1}, {"lobe_spread", 0.0}, {"radius_ratio", 0.8}}},
-                                  {"tectonics", {{"phases", phases}}}})[1]
-                           .state;
-    const wg::IslandGrid grid(state.params().values);
-    // Pattern value at (x, y) meters from the center (axis = x).
-    const auto at = [&](int k, double x, double y) {
-        const int i = static_cast<int>(std::floor(x / grid.cellM + grid.nx * 0.5));
-        const int j = static_cast<int>(std::floor(y / grid.cellM + grid.ny * 0.5));
-        return state.layer(wg::layers::upliftPattern(k)).at(i, j);
-    };
-    CHECK(at(0, 0, 0) > 0.95f && at(0, 0, 80) < 0.05f && at(0, 200, 0) < 0.05f); // block
-    CHECK(at(1, 0, 50) > 0.95f && at(1, 0, 150) < -0.95f && at(1, 0, -50) < -0.95f); // horst / graben
-    CHECK(at(2, 0, 50) > 0.45f && at(2, 0, 50) < 0.55f && at(2, 0, -200) < -0.95f); // tilt
-    CHECK(at(3, 0, 0) < -0.95f);                                                   // subsidence
-
-    // Derived faults: wherever a fault borders a non-zero pattern, its positive
-    // side (left of the trace) is the raised one.
-    const auto& p = state.params().values;
-    int checked = 0;
-    for (const auto& fault : p.geology.faults) {
-        const double a = fault.angleDeg * std::numbers::pi / 180.0;
-        const double nx = -std::sin(a), ny = std::cos(a), d = 2.0 * grid.cellM;
-        if (std::hypot(fault.x, fault.y) > 300.0)
-            continue; // outside the island core
-        for (int k : {0, 1}) {
-            const float raised = at(k, fault.x + nx * d, fault.y + ny * d);
-            const float lowered = at(k, fault.x - nx * d, fault.y - ny * d);
-            if (raised != lowered) {
-                CHECK(raised > lowered);
-                ++checked;
-            }
-        }
-    }
-    CHECK(checked >= 6); // the 4 block edges and the central horst boundaries
-}
-
-void testTectonicsByOrigin() {
-    for (int seed = 1; seed <= 12; ++seed) {
-        for (const char* origin : {"volcanic", "sedimentary", "coral"}) {
-            const auto t = wg::WorldConfig::fromJson({{"seed", seed}, {"origin", {{"type", origin}}}}).island().tectonics;
-            CHECK(t.phases.size() <= 1);
-            for (const auto& phase : t.phases)
-                CHECK(phase.type == (std::string(origin) == "volcanic" ? "dome" : "subsidence"));
-        }
-    }
-}
-
 void testSharedAxis() {
-    using J = nlohmann::json;
-    const J phases = {{"phases", J::array({{{"type", "dome"}}, {{"type", "collision"}}, {{"type", "collision"}}})}};
-    const auto p = wg::WorldConfig::fromJson({{"seed", 4}, {"origin", {{"type", "continental"}}}, {"tectonics", phases}})
-                       .island();
-    CHECK(p.tectonics.phases[1].angleDeg == p.shape.mainAxisDeg); // the first collision
-    CHECK(p.tectonics.phases[2].angleDeg != p.shape.mainAxisDeg);
+    const auto p = wg::WorldConfig::fromJson({{"seed", 4}, {"origin", {{"type", "continental"}}}}).island();
     CHECK(p.geology.folding.axisAngleDeg == p.shape.mainAxisDeg);
 
     // Forcing one of them leaves the others alone.
     const auto forced = wg::WorldConfig::fromJson({{"seed", 4},
                                                    {"origin", {{"type", "continental"}}},
-                                                   {"tectonics", phases},
                                                    {"geology", {{"folding", {{"axis_angle_deg", 12.0}}}}}})
                             .island();
-    CHECK(forced.geology.folding.axisAngleDeg == 12.0);
-    CHECK(forced.shape.mainAxisDeg == p.shape.mainAxisDeg && forced.tectonics.phases[1].angleDeg == p.shape.mainAxisDeg);
+    CHECK(forced.geology.folding.axisAngleDeg == 12.0 && forced.shape.mainAxisDeg == p.shape.mainAxisDeg);
 }
 
 void testGeology() {
@@ -611,10 +535,9 @@ void testGeology() {
                        {"geology", {{"strata", {{{"material", "limestone"}, {"thickness_m", 10}},
                                                 {{"material", "shale"}, {"thickness_m", 20}}}},
                                     {"basement_material", "granite"},
-                                    {"folding", {{"enabled", false}}},
-                                    {"fault_count", 0},
-                                    {"intrusion_count", 0}}},
-                       {"tectonics", {{"phase_count", 0}}}})
+                                    {"strata_top_m", 100},
+                                    {"folding", {{"enabled", false}}}}},
+                       {"origin", {{"type", "continental"}}}})
                       .island();
     const wg::Geology geology(params);
     const auto name = [&](int id) { return geology.materialNames()[id]; };
@@ -622,28 +545,33 @@ void testGeology() {
     CHECK(name(geology.strataMaterial(95, 100)) == "limestone");
     CHECK(name(geology.strataMaterial(85, 100)) == "shale");
     CHECK(name(geology.strataMaterial(60, 100)) == "granite");
-    // Full lookup (no folds, faults or intrusions here): uplift moves the strata.
-    CHECK(name(geology.material(0, 0, 85, 10, 100, 0)) == "shale"); // uplifted 10 m: rock from 75 m
-    CHECK(name(geology.material(0, 0, 95, 10, 100, 0)) == "shale");
+    // Full lookup (no folds here): horizontal strata from strata_top_m.
+    CHECK(name(geology.material(0, 0, 95)) == "limestone");
+    CHECK(name(geology.material(1000, -700, 85)) == "shale");
+    CHECK(name(geology.material(0, 0, 60)) == "granite");
+
+    // Volcanic island: strata parallel to the initial surface.
+    params.origin.type = "volcanic";
+    const wg::Grid2D<float> surface(4, 4, 200.0f);
+    const wg::Geology volcanic(params, &surface);
+    CHECK(name(volcanic.material(0, 0, 195)) == "limestone");
+    CHECK(name(volcanic.material(500, 300, 185)) == "shale");
+    CHECK(name(volcanic.material(0, 0, 95)) == "granite");
+    CHECK(name(wg::Geology(params).material(0, 0, 95)) == "limestone"); // no surface: horizontal
 }
 
-void testGeologyDeformation() {
+void testGeologyFolds() {
     using J = nlohmann::json;
     const auto params = wg::WorldConfig::fromJson(
                             {{"seed", 1},
-                             {"tectonics", {{"phase_count", 0}}},
+                             {"origin", {{"type", "continental"}}},
                              {"geology",
                               {{"strata", J::array({{{"material", "limestone"}, {"thickness_m", 50}},
                                                     {{"material", "shale"}, {"thickness_m", 50}}})},
                                {"basement_material", "gneiss"},
                                {"strata_top_m", 100},
                                {"folding", {{"enabled", true}, {"axis_angle_deg", 0}, {"wavelength_m", 400},
-                                            {"amplitude_m", 50}, {"asymmetry", 0}, {"plunge_deg", 0}}},
-                               {"faults", J::array({{{"x", 0}, {"y", 0}, {"angle_deg", 0}, {"length_m", 1000},
-                                                     {"dip_deg", 60}, {"offset_m", 30}}})},
-                               {"fault_tip_taper", 0.2},
-                               {"intrusions", J::array({{{"material", "granite"}, {"x", 2000}, {"y", 0},
-                                                         {"radius_m", 100}, {"top_m", 50}, {"dome_k", 0.5}}})}}}})
+                                            {"amplitude_m", 50}, {"asymmetry", 0}, {"plunge_deg", 0}}}}}})
                             .island();
     const wg::Geology geology(params);
     const auto name = [&](int id) { return geology.materialNames()[id]; };
@@ -652,65 +580,11 @@ void testGeologyDeformation() {
     CHECK(std::abs(geology.foldOffset(0, 100) - 50.0) < 1e-9);
     CHECK(std::abs(geology.foldOffset(123, 0)) < 1e-9);
 
-    // Fault along x: the left side (+y) is raised by 30 m; the plane dips
-    // towards -y, so at depth the raised block extends under the -y side.
-    CHECK(geology.faultOffset(0, 10, 0) == 30.0);
-    CHECK(geology.faultOffset(0, -10, 0) == 0.0);
-    CHECK(geology.faultOffset(0, -10, -100) == 30.0); // 100 m deep, the plane is 58 m towards -y
-    CHECK(geology.faultOffset(600, 10, 0) == 0.0);     // beyond its length
-    CHECK(geology.faultOffset(480, 10, 0) > 0.0 && geology.faultOffset(480, 10, 0) < 30.0); // tapered tip
-
-    // Same altitude on both sides of the fault: the raised side shows deeper
-    // strata (fold offset passed as 0 to isolate the fault).
-    CHECK(name(geology.material(0, -10, 40, 0, 100, 0)) == "shale");     // depth 60
-    CHECK(name(geology.material(0, 10, 40, 0, 100, 0)) == "shale");      // depth 90
-    CHECK(name(geology.material(0, 10, 15, 0, 100, 0)) == "gneiss");     // depth 115
-    CHECK(name(geology.material(0, -10, 15, 0, 100, 0)) == "shale");     // depth 85
-
-    // Intrusion: a dome at x = 2000 whose top (50 m) drops by 0.5 * radius at its edge.
-    CHECK(name(geology.material(2000, 0, 40, 0, 100, 0)) == "granite");
-    CHECK(name(geology.material(2090, 0, 20, 0, 100, 0)) != "granite"); // top 9.5 m at d = 90
-    CHECK(name(geology.material(2090, 0, 5, 0, 100, 0)) == "granite");
-    // A bell, not a cylinder: beyond its radius it continues, wider with depth.
-    CHECK(name(geology.material(2150, 0, -50, 0, 100, 0)) != "granite"); // roof at -62.5 m at d = 150
-    CHECK(name(geology.material(2150, 0, -100, 0, 100, 0)) == "granite");
-}
-
-void testDerivedFaultsFollowTheirPhase() {
-    using J = nlohmann::json;
-    const auto params = wg::WorldConfig::fromJson(
-                            {{"seed", 1},
-                             {"geology", {{"fault_count", 0}}},
-                             {"tectonics", {{"phases", J::array({{{"type", "block_uplift"}, {"center", {0, 0}},
-                                                                   {"angle_deg", 0}, {"length_m", 600}, {"width_m", 300},
-                                                                   {"rate_m_per_year", 1e-4}, {"start_years", 0},
-                                                                   {"end_years", 100000}}})}}}})
-                            .island();
-    wg::Geology geology(params);
-    CHECK(geology.faultOffset(0, 0, 0) == 0.0); // the phase has not acted yet
-    geology.setPhaseProgress({0.5});
-    CHECK(std::abs(geology.faultOffset(0, 0, 0) - 5.0) < 1e-9); // half of 1e-4 * 1e5
-    geology.setPhaseProgress({1.0});
-    CHECK(std::abs(geology.faultOffset(0, 0, 0) - 10.0) < 1e-9);
-    CHECK(geology.faultOffset(0, 400, 0) == 0.0); // outside the block
-    CHECK(geology.faultOffset(0, 160, 0) == 0.0); // just outside at sea level...
-    const double dip = params.tectonics.phases[0].faultDipDeg * std::numbers::pi / 180.0;
-    CHECK(geology.faultOffset(0, 160, -20.0 * std::tan(dip)) == 10.0); // ...inside 20 m deeper: the walls dip outwards
-
-    // Horst / graben: bands across the axis, raised and lowered by U.
-    const auto bands = wg::WorldConfig::fromJson(
-                           {{"seed", 1},
-                            {"geology", {{"fault_count", 0}}},
-                            {"tectonics", {{"phases", J::array({{{"type", "horst_graben"}, {"center", {0, 0}},
-                                                                  {"angle_deg", 0}, {"length_m", 2000}, {"width_m", 200},
-                                                                  {"rate_m_per_year", 1e-4}, {"start_years", 0},
-                                                                  {"end_years", 100000}}})}}}})
-                           .island();
-    wg::Geology horsts(bands);
-    horsts.setPhaseProgress({1.0});
-    CHECK(horsts.faultOffset(0, 100, 0) == 10.0);  // band 0: horst
-    CHECK(horsts.faultOffset(0, 300, 0) == -10.0); // band 1: graben
-    CHECK(horsts.faultOffset(0, -100, 0) == -10.0);
+    // The strata follow the folds: at the crest (v = 100) they are 50 m higher.
+    CHECK(name(geology.material(0, 0, 95)) == "limestone");  // depth 5
+    CHECK(name(geology.material(0, 0, 45)) == "shale");      // depth 55
+    CHECK(name(geology.material(0, 100, 95)) == "shale");    // crest: depth 55
+    CHECK(name(geology.material(0, -100, 45)) == "limestone"); // trough: depth 5
 }
 
 void testVoxelVolume() {
@@ -783,11 +657,8 @@ int main() {
     testSharedAxis();
     testAtoll();
     testTopographyByOrigin();
-    testUpliftPatterns();
-    testTectonicsByOrigin();
     testGeology();
-    testGeologyDeformation();
-    testDerivedFaultsFollowTheirPhase();
+    testGeologyFolds();
     testVoxelVolume();
     testWorldFileRoundTrip();
     testDeterminism();

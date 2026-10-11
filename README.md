@@ -4,7 +4,7 @@ Générateur de monde **fini** (un continent) en C++20, pensé pour être export
 mais indépendant de tout format de jeu.
 
 Comme le monde est généré en entier (et pas chunk par chunk), les étapes peuvent faire des
-traitements globaux : érosion, rivières, simulation climatique...
+traitements globaux, comme l'érosion.
 
 > Pour comprendre le fonctionnement interne (architecture, algorithmes de chaque étape),
 > voir le [wiki](wiki/README.md).
@@ -87,17 +87,14 @@ La config de référence est [`island_params.jsonc`](island_params.jsonc) (JSON 
   puis remplacée par celle du fichier si elle n'est pas `null`. Overrider un paramètre, ou en
   ajouter un nouveau dans le code, ne décale donc jamais la valeur des autres.
 - **Dépendances.** Certaines distributions dépendent de paramètres déjà résolus, surtout
-  `origin.type` et `origin.age` : matériaux des strates, mode de topographie initiale, durée de
-  simulation, taux de soulèvement, probabilité de plissement, nombre de glaciations selon la
-  température... Elles utilisent la valeur finale, override comprise : forcer
+  `origin.type` : forme de l'île, matériaux des strates, mode de topographie initiale,
+  probabilité de plissement... Elles utilisent la valeur finale, override comprise : forcer
   `origin.type: "volcanic"` donne des strates de basalte et de tuf, avec les mêmes tirages.
-- **Listes** (`geology.strata`, `faults`, `intrusions`, `tectonics.phases`,
-  `timeline.glaciations`). Si le fichier donne un tableau, sa longueur fixe le nombre
+- **Listes** (`geology.strata`). Si le fichier donne un tableau, sa longueur fixe le nombre
   d'éléments. Les champs absents ou `null` d'un élément sont tirés comme les autres ;
   `{ "material": "granite" }` fixe le matériau et tire l'épaisseur. Sinon, le nombre vient de
-  `*_count`, tiré ou fixé. `timeline.sea_level_curve` est dérivée des glaciations, chacune ayant
-  un champ `sea_level_drop_m`, sauf si elle est donnée en entier.
-- **Paramètres sans aléatoire** (`world.*`, `erosion.fluvial.m`...) : la valeur du fichier, ou
+  `*_count`, tiré ou fixé.
+- **Paramètres sans aléatoire** (`world.*`, `simulation.resolution`...) : la valeur du fichier, ou
   un défaut fixe si elle est `null`.
 - **Validation.** Les types, les choix possibles (`origin.type`, matériaux connus de
   `geology.materials`...) et les clés inconnues (fautes de frappe) sont vérifiés au chargement,
@@ -108,8 +105,8 @@ plages notées `[a, b]` dans le fichier y sont reprises telles quelles ; les aut
 choix plausibles, à ajuster. `wgen --params out.json` écrit la config complète, avec toutes les
 valeurs remplies : réutilisée comme config, elle redonne exactement les mêmes paramètres.
 
-Unités : mètres, années, degrés, °C. Les fréquences de bruit sont en cycles par km, et les
-coordonnées (`x`, `y`, `center`) en mètres depuis le coin de la carte. `world.min_y` et
+Unités : mètres et degrés. Les fréquences de bruit sont en cycles par rayon d'île, et les
+coordonnées (`x`, `y`, `center`) en mètres depuis le centre de la carte. `world.min_y` et
 `world.max_y` (défauts `-64` / `320`) bornent le monde voxel ; ils sont provisoires, à revoir
 avec la voxelisation.
 
@@ -131,11 +128,11 @@ l'étape) et les paramètres propres à l'étape.
 | Type          | Rôle                                                                                          |
 |---------------|-----------------------------------------------------------------------------------------------|
 | `parameters`  | Étape 1 : publie les paramètres résolus dans l'état du monde (`world.params()`)                |
-| `island_init` | Étape 2 : état initial de l'île sur la grille grossière, sans simulation (voir ci-dessous)     |
+| `island_init` | Étape 2 : état initial de l'île sur la grille de simulation, sans érosion (voir ci-dessous)    |
 
 #### `island_init`
 
-Grille de `simulation.coarse_resolution` cellules de large, cellules carrées, origine au centre.
+Grille de `simulation.resolution` cellules de large, cellules carrées, origine au centre.
 Avec `R` le rayon de l'île et `q = p / R`, toutes les fréquences de bruit sont en cycles par
 rayon. Chaque usage aléatoire a sa sous-seed (`"shape"`, `"topo"`, `"seafloor"`). Le
 résultat est identique au bit près pour une même seed et une même config.
@@ -145,18 +142,14 @@ résultat est identique au bit près pour une même seed et une même config.
 | `h`                  | altitude (m), mer à `world.sea_level_y`                                         |
 | `mask`               | terre [0, 1] : smoothstep de `coast_dist` sur `shape.coast_falloff_m`           |
 | `coast_dist`         | distance signée à la côte (m, > 0 = terre) : lobes + domain warp fBm            |
-| `uplift_pattern_k`   | motif spatial de la phase tectonique k, dans [-1, 1] (taux et durée : étape 3)  |
 | `surface_material`   | matériau à la surface (`material(x, y, h)`)                                     |
-| `cum_uplift`, `sediment`, `ice` | initialisés à 0                                                      |
+| `lagoon`             | 1 dans le lagon d'un atoll                                                      |
+| `fold_offset`        | déplacement vertical des strates par le pli (m)                                 |
 | `h_initial`          | copie de `h` en fin d'étape                                                     |
 | `flags` (octets)     | bit `FIXED` sur l'anneau de bord, où `h = boundary_depth_m`                     |
 
 Le détail des algorithmes est dans [wiki/etape-2-initialisation.md](wiki/etape-2-initialisation.md).
 
-Fait (jalon 1) : masque, bathymétrie (plateau, talus, bruit du fond), topographie `flat`,
-`peneplain` et `noise`, motifs `dome` et `collision`, strates horizontales.
-À venir : cônes volcaniques (jalon 2), autres types de soulèvement (jalon 3, motif nul pour
-l'instant), plis, failles et intrusions (jalon 4).
 
 ## Architecture
 
@@ -170,8 +163,8 @@ src/wg/                    bibliothèque "wg" (aucune dépendance au rendu)
   params/IslandParams      structure typée de tous les paramètres + leurs distributions
   params/ParamResolver     tirage par paramètre depuis la seed, overrides, validation
   island/IslandLayers      noms des calques de l'île et flags de cellule
-  island/IslandGrid        géométrie de la grille grossière (origine au centre)
-  island/Geology           strates : material(z, cum_uplift, z_ref)
+  island/IslandGrid        géométrie de la grille de simulation (origine au centre)
+  island/Geology           strates et plis : material(x, y, z)
   noise/Fbm                fBm OpenSimplex2 (FastNoiseLite)
   core/Random              RNG déterministe et dérivation de graines
   gen/Stage                interface d'une étape

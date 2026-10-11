@@ -37,7 +37,7 @@ void printUsage() {
                  "  --origin TYPE    force origin.type (volcanic, continental, sedimentary, coral),\n"
                  "                   or \"all\" for one group per origin\n"
                  "  --first-seed S   first seed (default 1)\n"
-                 "  --resolution N   override simulation.coarse_resolution (e.g. 256 for speed)\n"
+                 "  --resolution N   override simulation.resolution (e.g. 256 for speed)\n"
                  "  --columns N      thumbnails per row (default 8)\n"
                  "  --thumbnail PX   thumbnail width (default 256)\n");
 }

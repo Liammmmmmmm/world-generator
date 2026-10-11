@@ -2,11 +2,9 @@
 
 #include <cstdint>
 #include <functional>
-#include <initializer_list>
 #include <optional>
 #include <set>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -48,14 +46,8 @@ public:
     double number(const std::string& path, double fallback);
     int whole(const std::string& path, int fallback);
     bool flag(const std::string& path, bool fallback);
-    std::string text(const std::string& path, const std::string& fallback,
-                     std::initializer_list<std::string_view> allowed = {});
-    std::optional<std::string> optionalText(const std::string& path);
-    std::vector<std::string> textList(const std::string& path);
     // Default object deep-merged with the config object.
     nlohmann::json object(const std::string& path, const nlohmann::json& defaults);
-    // Any JSON value, null by default.
-    nlohmann::json raw(const std::string& path);
 
     // --- Lists ---------------------------------------------------------------
     // Number of elements of the list at `listPath`: the length of the config
@@ -64,8 +56,6 @@ public:
     // like any parameter ("list[i].field"), so a config element may set only
     // some fields.
     int listSize(const std::string& listPath, const std::string& countPath, int minCount, int maxCount);
-    // List fully given by the config (no drawing), or nullptr.
-    const nlohmann::json* configList(const std::string& path);
 
     // --- Bookkeeping ---------------------------------------------------------
     // Records a value computed outside of the helpers above.

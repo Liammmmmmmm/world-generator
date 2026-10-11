@@ -1,6 +1,6 @@
 # Étape 2 : initialisation de l'île (`island_init`)
 
-Construire l'**état initial** de l'île sur la grille de simulation : contour, fonds marins, relief de départ, motifs tectoniques et géologie. L'étape ne fait **aucune simulation** (pas d'érosion, pas de boucle temporelle) : c'est l'étape 3 qui fera vivre cet état.
+Construire l'**état initial** de l'île sur la grille de simulation : contour, fonds marins, relief de départ et géologie. L'étape ne fait **aucune érosion** : c'est l'étape `erosion` qui façonnera cet état.
 
 ← [Étape 1](etape-1-parametres.md) · [Vue d'ensemble](README.md)
 
@@ -14,7 +14,7 @@ Code : [IslandInitStage.cpp](../src/wg/gen/stages/IslandInitStage.cpp), avec
 ### Grille ([IslandGrid.hpp](../src/wg/island/IslandGrid.hpp))
 
 ```
-nx    = simulation.coarse_resolution          (1024)
+nx    = simulation.resolution                 (1024)
 cellM = world.width · block_size / nx         (4 m pour une carte de 4096 blocs)
 ny    = arrondi(world.length · block_size / cellM)
 centre de la cellule (i, j) :  x = (i + 0.5 − nx/2) · cellM     origine au centre de la carte
@@ -56,7 +56,7 @@ amplitude × `gain` à chaque couche). La sortie est à peu près dans [−1, 1]
 ## 2. Calques produits
 
 Tous les calques font `nx × ny` cellules. Les noms sont définis dans
-[IslandLayers.hpp](../src/wg/island/IslandLayers.hpp), qui sert de contrat avec l'étape 3.
+[IslandLayers.hpp](../src/wg/island/IslandLayers.hpp), qui sert de contrat avec les étapes suivantes.
 
 | Calque | Type / style | Contenu |
 |--------|--------------|---------|
@@ -64,13 +64,8 @@ Tous les calques font `nx × ny` cellules. Les noms sont définis dans
 | `mask` | float, Scalar | terre ∈ [0, 1] |
 | `coast_dist` | float, Diverging | distance signée à la côte (m), > 0 = terre |
 | `lagoon` | float, Scalar | 1 dans le lagon d'un atoll, sinon 0 |
-| `uplift_pattern_k` | float, Diverging | motif spatial de la phase tectonique k, ∈ [−1, 1] |
 | `surface_material` | float, Categorical | id du matériau en surface (étiquettes = noms des matériaux) |
-| `cum_uplift` | float | soulèvement cumulé, 0 |
-| `sediment` | float | épaisseur de sédiments, 0 |
-| `ice` | float | épaisseur de glace, 0 |
 | `fold_offset` | float, Diverging | déplacement vertical des strates par le pli (m) |
-| `fault_traces` | float, Scalar | 1 sur la trace d'une faille (validation) |
 | `flags` | octets | bit `kFixed` sur l'anneau de bord, `kInLagoon` dans un lagon |
 | `h_initial` | float, Height | copie de `h` en fin d'étape |
 
@@ -299,83 +294,26 @@ simple `lerp(h_sea, h_land, mask)` placerait la côte là où le mélange passe 
 de transition, là où les petites octaves du warp transforment la côte en confettis. Une
 terre qui tomberait sous le niveau de la mer est ramenée au niveau de la mer.
 
-La micro-perturbation (1 mm au plus) sert l'étape 3. Sans elle, les zones plates (plateau,
-mode `flat`) n'auraient aucune pente : le calcul du drainage y dégénérerait, avec des
-directions d'écoulement indéfinies et des égalités partout.
+La micro-perturbation (1 mm au plus) évite les zones exactement plates (plateau, mode
+`flat`) : l'eau y garde toujours une direction à suivre.
 
 ### 3.4 Conditions aux limites
 
 L'anneau d'une cellule au bord reçoit `flags |= kFixed` et `h = sea + boundary_depth_m`.
-L'étape 3 maintiendra ces cellules fixes : c'est là que l'eau et les sédiments quittent le
+L'érosion maintiendra ces cellules fixes : c'est là que l'eau et les sédiments quittent le
 domaine.
 
-### 3.5 Motifs de soulèvement (`tectonics.phases`)
-
-On ne stocke que le **motif spatial** de chaque phase. Le taux (`rate_m_per_year`, toujours
-positif) et la fenêtre de temps seront appliqués à l'étape 3 :
-`cum_uplift += pattern_k × rate_k × dt` pendant la phase. Le **signe est porté par le
-motif** : une subsidence est un dôme négatif.
-
-Les phases dépendent de l'origine (étape 1) :
-
-| Origine | Phases |
-|---------|--------|
-| volcanique | aucune ou un dôme faible |
-| sédimentaire, corallienne | aucune ou une subsidence faible |
-| continentale | 1 à 4, tous les types ; la première `collision` suit l'axe principal de l'île |
-
-Pour une phase de centre `c` et d'angle `angle_deg`, `u` est la coordonnée le long de l'axe
-et `v` la coordonnée perpendiculaire :
-
-```
-gauss(t) = exp(−t²/2)                   // width_m joue le rôle d'un écart-type
-taper(t) = 1 − smoothstep((1 − falloff)/2, 1/2, |t|)    // 1 au milieu, 0 aux extrémités
-
-dome          P = gauss(|p − c| / width_m)
-subsidence    P = −gauss(|p − c| / width_m)
-collision     P = gauss(v / width_m) · taper(u / length_m)
-block_uplift  P = taper(u / length_m) · taper(v / width_m)          // rectangle à bords étroits
-horst_graben  P = ±1 selon la parité de floor(v / width_m)          // bandes parallèles à l'axe
-                  · smoothstep(0, falloff · width_m / 2, distance à la limite de bande)
-                  · taper(u / length_m)                            // longueur finie
-tilt          P = clamp(v / width_m, −1, 1)
-
-P *= smoothstep(0, 1, mask) ;  P = 0 sur l'anneau FIXED
-```
-
-Le `falloff` est tiré étroit pour `block_uplift` et `horst_graben` (0,05 à 0,2), et large
-pour les autres (0,2 à 1).
-
-**Failles cohérentes.** L'étape 1 génère des failles sur les bords de chaque
-`block_uplift` et `horst_graben` (`phaseFaults` dans `IslandParams.cpp`), et les ajoute à
-`geology.faults` :
-
-- **bloc :** quatre failles, une par bord, côté soulevé vers l'intérieur, décalage
-  `rate × durée` ;
-- **horst / graben :** une faille par limite de bandes qui croise l'île, côté horst soulevé,
-  décalage `2 × rate × durée` (de −U à +U) ;
-- **pendage :** `fault_dip_deg` de la phase.
-
-**Convention d'une faille :** une trace centrée sur (`x`, `y`), le long de `angle_deg`. Son
-côté **positif**, à gauche de la direction (normale `(−sin, cos)`), monte de `offset_m`.
-
-Ces failles dérivées sont visibles dans la vue `parameters` (`geology.derived_faults`). Elles
-sont toujours recalculées à partir des phases : la config ne peut pas les fixer, ce qui
-préserve l'aller-retour de `toJson()`. Le calque `fault_traces` dessine toutes les failles
-sur la carte, pour vérifier qu'elles bordent bien les motifs.
-
-### 3.6 Géologie ([Geology.{hpp,cpp}](../src/wg/island/Geology.hpp))
+### 3.5 Géologie ([Geology.{hpp,cpp}](../src/wg/island/Geology.hpp))
 
 `Geology` décrit la **roche en place** et répond à « quel matériau en (x, y, z) ? ». Elle se
-construit à partir des paramètres (la profondeur cumulée du bas de chaque strate, la
-géométrie des failles...), en quelques microsecondes.
+construit à partir des paramètres (la profondeur cumulée du bas de chaque strate, le pli)
+et, pour une île volcanique, de la surface initiale.
 
 ```
-material(x, y, z, cum_uplift, z_ref, D_fold):
-    z_rock = z − cum_uplift − D_fold(x, y) − D_fault(x, y, z)   // les strates bougent avec la roche
-    intrusions (testées d'abord) : un dôme de rayon r, de sommet top_m
-        dist2d < r  et  z_rock < top_m − dome_k · (dist2d / r)² · r   → matériau de l'intrusion
-    depth = z_ref − z_rock
+material(x, y, z):
+    z_ref  = sea + strata_top_m,  ou h_initial(x, y) pour une île volcanique
+    z_rock = z − D_fold(x, y)                 // les strates bougent avec le pli
+    depth  = z_ref − z_rock
     depth < 0          → strata[0]   (au-dessus de la pile : sa couche du haut)
     i = upper_bound(bottoms, depth)  // recherche binaire
     i < nombre de strates → strata[i], sinon basement_material
@@ -388,46 +326,17 @@ material(x, y, z, cum_uplift, z_ref, D_fold):
   déverse les plis, et le plongement incline leur axe. La longueur d'onde vaut 0,4 à 1,5 fois
   `R`, et l'amplitude 3 à 20 % de la longueur d'onde. Tirées indépendamment, elles donnaient
   des plis aux flancs presque verticaux, qui se répétaient tous les 300 m.
-- **Failles anciennes** (`geology.faults`, tirées ; dépendent de `z`) :
-  - **plan :** il contient la trace au niveau de la mer et plonge de `dip_deg` vers le côté
-    abaissé. À `d` mètres sous la mer, il est décalé de `d / tan(dip)` de ce côté ;
-  - **décalage :** un point du côté positif du plan (le côté soulevé, à gauche de la
-    trace), dont la projection tombe dans la longueur de la faille, reçoit `+offset_m` ;
-  - **extrémités :** le décalage s'atténue sur une fraction `geology.fault_tip_taper` de la
-    demi-longueur.
-
-  Ces failles sont indépendantes et leurs décalages s'additionnent ; elles sont décalées dès
-  le départ.
-- **Phases à failles** (`block_uplift`, `horst_graben`) : elles déplacent des **blocs
-  entiers** entre des murs inclinés de `fault_dip_deg`. Les murs passent par le contour de la
-  phase au niveau de la mer, et s'écartent du bloc soulevé en profondeur, comme les failles
-  normales d'un horst :
-  - **bloc :** il monte de `U` (le soulèvement total de la phase) ;
-  - **bandes :** les horsts montent de `U`, les grabens descendent de `U`.
-
-  Le déplacement est pondéré par l'**avancement de la phase** (`setPhaseProgress`). Il est nul
-  à l'étape 2, puisque la phase n'a pas encore agi : un décalage des strates sans relief
-  correspondant n'aurait pas de sens. Les failles dérivées (`geology.derived_faults`) sont les
-  murs de ces blocs. Elles servent au tracé (`fault_traces`) et à l'affichage, mais ne
-  s'additionnent pas : quatre failles autour d'un bloc le soulèveraient quatre fois.
-- **Intrusions** (`geology.intrusions`) : des dômes d'un seul matériau. Pour une île
-  continentale qui a une phase `collision`, elles sont placées dans la zone de la chaîne.
-- **`z_ref`** vaut `sea + geology.strata_top_m`. Pour une origine volcanique, c'est
-  `h_initial` : les couches de lave et de tuf sont parallèles aux flancs.
+- **`z_ref`** vaut `sea + geology.strata_top_m` : strates horizontales. Pour une origine
+  volcanique, c'est `h_initial` (interpolé) : les couches de lave et de tuf sont parallèles
+  aux flancs.
 - **Les ids de matériaux** indexent `materialNames()`, les noms de `geology.materials` triés.
-  Ce sont les catégories du calque `surface_material`, rempli avec la consultation complète en
-  `z = h`.
+  Ce sont les catégories du calque `surface_material`, rempli avec `material(x, y, h)`.
 
-**Pour l'étape 3.** Elle fera avancer `setPhaseProgress` avec le temps. Les strates des
-phases à failles bougeront alors avec leurs blocs : la part de ces phases dans `cum_uplift`
-ne devra donc pas aussi décaler les strates (`cum_uplift` sert au relief, les blocs aux
-roches), sinon elles monteraient deux fois.
-
-### 3.7 Vérifications et suivi en direct
+### 3.6 Vérifications et suivi en direct
 
 - **Altitudes finies :** en fin d'étape, toute altitude non finie lève une `WorldError`.
 - **Progression :** elle est rapportée toutes les 32 lignes (masque : 0 → 40 %, altitudes :
-  40 → 75 %, motifs : 75 → 90 %). Le viewer montre donc les calques se remplir.
+  40 → 75 %, matériaux : 75 → 95 %). Le viewer montre donc les calques se remplir.
 
 ## 4. Ce que vérifier dans le viewer
 
@@ -436,22 +345,20 @@ roches), sinon elles monteraient deux fois.
 | `h` | île, liseré bleu clair (plateau), pente ombrée vers un fond plus sombre, cadre uniforme au bord |
 | `mask` | blanc sur l'île, noir en mer, transition douce |
 | `coast_dist` | côte blanche, terre rouge vers l'intérieur, mer bleue vers le large |
-| `uplift_pattern_k` | dôme rond ou chaîne orientée, s'atténuant aux extrémités, nul en mer |
 | `surface_material` | couleurs de la légende ; changer `geology.strata_top_m` change ce qui affleure |
 
 Les tests ([tests/main.cpp](../tests/main.cpp), `testIslandInit`, `testIslandFitsInMap`)
 vérifient :
 - **reproductibilité :** déterminisme au bit près ;
-- **validité :** absence de NaN, anneau `FIXED` à la bonne profondeur, motifs dans [−1, 1] ;
+- **validité :** absence de NaN, anneau `FIXED` à la bonne profondeur ;
 - **contour :** sur 20 seeds, mer sur les bords et raccord sans marche au fond imposé.
 
 ## 5. Limites connues et suite
 
 - **Îlots et lacs.** Les lobes séparés donnent plusieurs îles. Quand une baie tombe dans un
-  autre lobe, elle crée un lagon fermé. `shape.keep_satellite_islets` et `min_islet_area_m2`
-  ne sont pas encore appliqués : ce sera fait plus tard (hydrologie, nettoyage).
+  autre lobe, elle crée un lagon fermé. Aucun îlot n'est retiré.
 - **Outils de validation :**
-  - **coupe verticale du viewer** (`X`) : on y voit les plis, les failles décalées en
-    profondeur, les dômes d'intrusion et les couches volcaniques parallèles aux flancs ;
+  - **coupe verticale du viewer** (`X`) : on y voit les plis et les couches volcaniques
+    parallèles aux flancs ;
   - **galerie** (`wgen --gallery … --origin all`) : pour comparer la variété des îles par
     origine.

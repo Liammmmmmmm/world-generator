@@ -211,49 +211,6 @@ bool ParamResolver::flag(const std::string& path, bool fallback) {
     return result;
 }
 
-std::string ParamResolver::text(const std::string& path, const std::string& fallback,
-                                std::initializer_list<std::string_view> allowed) {
-    const nlohmann::json* value = configValue(path);
-    if (value) {
-        const bool ok = value->is_string() &&
-                        (allowed.size() == 0 ||
-                         std::find(allowed.begin(), allowed.end(), value->get<std::string>()) != allowed.end());
-        if (!ok) {
-            std::string options;
-            for (auto option : allowed)
-                options += (options.empty() ? "\"" : ", \"") + std::string(option) + "\"";
-            throw typeError(path, allowed.size() ? ("one of " + options).c_str() : "a string");
-        }
-    }
-    const std::string result = value ? value->get<std::string>() : fallback;
-    record(path, result, value ? ParamSource::Config : ParamSource::Default);
-    return result;
-}
-
-std::optional<std::string> ParamResolver::optionalText(const std::string& path) {
-    const nlohmann::json* value = configValue(path);
-    if (value && !value->is_string())
-        throw typeError(path, "a string or null");
-    record(path, value ? *value : nlohmann::json(), value ? ParamSource::Config : ParamSource::Default);
-    return value ? std::optional<std::string>(value->get<std::string>()) : std::nullopt;
-}
-
-std::vector<std::string> ParamResolver::textList(const std::string& path) {
-    const nlohmann::json* value = configValue(path);
-    std::vector<std::string> result;
-    if (value) {
-        if (!value->is_array())
-            throw typeError(path, "an array of strings");
-        for (const auto& item : *value) {
-            if (!item.is_string())
-                throw typeError(path, "an array of strings");
-            result.push_back(item.get<std::string>());
-        }
-    }
-    record(path, result, value ? ParamSource::Config : ParamSource::Default);
-    return result;
-}
-
 nlohmann::json ParamResolver::object(const std::string& path, const nlohmann::json& defaults) {
     nlohmann::json result = defaults;
     const nlohmann::json* value = configValue(path);
@@ -264,12 +221,6 @@ nlohmann::json ParamResolver::object(const std::string& path, const nlohmann::js
     }
     record(path, result, value ? ParamSource::Config : ParamSource::Default);
     return result;
-}
-
-nlohmann::json ParamResolver::raw(const std::string& path) {
-    const nlohmann::json* value = configValue(path);
-    record(path, value ? *value : nlohmann::json(), value ? ParamSource::Config : ParamSource::Default);
-    return value ? *value : nlohmann::json();
 }
 
 // --- Lists -------------------------------------------------------------------------
@@ -301,13 +252,6 @@ int ParamResolver::listSize(const std::string& listPath, const std::string& coun
     if (count == 0)
         record(listPath, nlohmann::json::array(), ParamSource::Seed);
     return count;
-}
-
-const nlohmann::json* ParamResolver::configList(const std::string& path) {
-    const nlohmann::json* value = configValue(path);
-    if (value && !value->is_array())
-        throw typeError(path, "an array or null");
-    return value;
 }
 
 // --- Validation ----------------------------------------------------------------------
