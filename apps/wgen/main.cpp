@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string_view>
 
+#include "Calibrate.hpp"
 #include "Gallery.hpp"
 #include "wg/core/Config.hpp"
 #include "wg/gen/Pipeline.hpp"
@@ -39,7 +40,11 @@ void printUsage() {
                  "  --first-seed S   first seed (default 1)\n"
                  "  --resolution N   override simulation.coarse_resolution (e.g. 256 for speed)\n"
                  "  --columns N      thumbnails per row (default 8)\n"
-                 "  --thumbnail PX   thumbnail width (default 256)\n");
+                 "  --thumbnail PX   thumbnail width (default 256)\n"
+                 "\n"
+                 "usage: wgen <config.jsonc> --calibrate [--resolution N]\n"
+                 "  steady-state relief of a fixed island for a grid of uplift rates and k_base\n"
+                 "  (only world.* is read from the config; --resolution defaults to 512)\n");
 }
 
 } // namespace
@@ -47,6 +52,7 @@ void printUsage() {
 int main(int argc, char** argv) {
     std::optional<fs::path> configPath, outPath, paramsPath, pngPath, stagesDir;
     std::optional<fs::path> galleryPath;
+    bool calibrate = false;
     GalleryOptions gallery;
     const auto number = [](const char* text) { // -1 when not a number (then rejected)
         try {
@@ -67,6 +73,8 @@ int main(int argc, char** argv) {
             pngPath = argv[++i];
         else if (arg == "--stages" && hasValue)
             stagesDir = argv[++i];
+        else if (arg == "--calibrate")
+            calibrate = true;
         else if (arg == "--gallery" && hasValue)
             galleryPath = argv[++i];
         else if (arg == "--count" && hasValue)
@@ -94,6 +102,18 @@ int main(int argc, char** argv) {
     if (!configPath) {
         printUsage();
         return 2;
+    }
+    if (calibrate) {
+        CalibrateOptions options;
+        options.configPath = *configPath;
+        if (gallery.resolution) {
+            if (*gallery.resolution < 8) {
+                printUsage();
+                return 2;
+            }
+            options.resolution = *gallery.resolution;
+        }
+        return runCalibration(options);
     }
     if (galleryPath) {
         gallery.configPath = *configPath;
@@ -128,6 +148,10 @@ int main(int argc, char** argv) {
         }
 
         wg::PipelineCallbacks callbacks;
+        callbacks.onLog = [](std::size_t index, const std::string& message) {
+            std::printf("      [%zu] %s\n", index + 1, message.c_str());
+            std::fflush(stdout);
+        };
         callbacks.onStageDone = [&](std::size_t index, const wg::Snapshot& snapshot) {
             std::printf("  %2zu. %-16s %-12s %8.1f ms\n", index + 1, snapshot.stageName.c_str(),
                         snapshot.stageType.c_str(), snapshot.seconds * 1000.0);

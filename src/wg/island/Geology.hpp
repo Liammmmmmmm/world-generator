@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "wg/island/UpliftPattern.hpp"
 #include "wg/params/IslandParams.hpp"
 
 namespace wg {
@@ -17,7 +18,8 @@ namespace wg {
 //   - faults: D_fault(x, y, z), which depends on depth (dipping planes):
 //     old faults (geology.faults) each raise their positive side, and the
 //     fault-bounded tectonic phases (block_uplift, horst_graben) move whole
-//     blocks between dipping walls, as far as the phase has gone.
+//     blocks between dipping walls, as far as the phase has gone (the walls
+//     follow the warped outline of the phase's pattern, see UpliftPattern).
 // so a lookup uses z_rock = z - cum_uplift - D_fold - D_fault. Intrusions
 // (bell-shaped plutons of a single material) are tested first.
 //
@@ -59,14 +61,11 @@ private:
         double cotDip;   // horizontal shift of the plane per meter of depth
         double offset;
     };
-    // A block_uplift or horst_graben phase, in its own frame (u along the axis).
+    // A block_uplift or horst_graben phase (its walls follow the warped pattern).
     struct FaultedPhase {
-        int index;          // in tectonics.phases (progress)
-        bool horstGraben;
-        double cx, cy, ux, uy;
-        double length, width, falloff;
-        double cotDip;
-        double uplift;      // total uplift U of the phase (m)
+        int index;     // in tectonics.phases (progress)
+        UpliftPattern pattern;
+        double uplift; // total uplift U of the phase (m)
     };
     struct Intrusion {
         int material;

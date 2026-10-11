@@ -21,6 +21,7 @@ public:
 //   u32 layerCount, then per float layer: string name | i32 width, length | u8 style |
 //     u32 categoryCount, string categories... | f32[width * length]
 //   u32 byteLayerCount, then per byte layer: string name | i32 width, length | u8[width * length]
+//   u32 scalarCount, then per scalar: string name | f64 value
 //   u8 hasVoxels, then per section: u8 0 + u8 block (uniform) | u8 1 + u8[4096]
 void writeWorld(const WorldState& world, const std::filesystem::path& path);
 WorldState readWorld(const std::filesystem::path& path);

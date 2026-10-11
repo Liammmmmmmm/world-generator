@@ -105,16 +105,32 @@ std::vector<Snapshot> Pipeline::run(const WorldConfig& config, const PipelineCal
         const auto start = Clock::now();
         auto lastPreview = start;
 
-        StageContext context{config, info, deriveSeed(info.seed, entry.name), entry.name, [&](float fraction) {
-                                 checkCancelled();
-                                 if (!callbacks.onStageProgress || secondsSince(lastPreview) < callbacks.previewInterval)
-                                     return;
-                                 lastPreview = Clock::now();
-                                 Snapshot preview{entry.name, entry.type, {}, secondsSince(start), {}, false, false};
-                                 diff(preview, state, before);
-                                 preview.state = state.deepCopy();
-                                 callbacks.onStageProgress(i, std::move(preview), std::clamp(fraction, 0.0f, 1.0f));
-                             }};
+        StageContext context{config, info, deriveSeed(info.seed, entry.name), entry.name, {}, {}, {}};
+        context.onProgress = [&](float fraction, bool force, const std::function<void()>& beforePreview) {
+            checkCancelled();
+            if (!callbacks.onStageProgress || (!force && secondsSince(lastPreview) < callbacks.previewInterval))
+                return;
+            lastPreview = Clock::now();
+            if (beforePreview)
+                beforePreview();
+            Snapshot preview{entry.name, entry.type, {}, secondsSince(start), {}, false, false};
+            diff(preview, state, before);
+            preview.state = state.deepCopy();
+            callbacks.onStageProgress(i, std::move(preview), std::clamp(fraction, 0.0f, 1.0f));
+        };
+        if (callbacks.onTick)
+            context.onTick = [&] {
+                const bool paused = callbacks.onTick(i);
+                checkCancelled();
+                return paused;
+            };
+        else
+            context.onTick = [&] {
+                checkCancelled();
+                return false;
+            };
+        if (callbacks.onLog)
+            context.onLog = [&](const std::string& message) { callbacks.onLog(i, message); };
 
         try {
             entry.stage->run(state, context);

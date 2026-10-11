@@ -132,6 +132,12 @@ Rgb materialColor(std::string_view name) {
 LayerPalette::LayerPalette(const Grid2D<float>& layer, const LayerMeta& meta, ColorMap colorMap, double seaLevelM)
     : style_(colorMap == ColorMap::Grayscale ? LayerStyle::Scalar : meta.style), range_(valueRange(layer)),
       seaLevelM_(seaLevelM) {
+    logFloor_ = range_.max;
+    for (float v : layer.data())
+        if (v > 0.0f)
+            logFloor_ = std::min(logFloor_, static_cast<double>(v));
+    // At most 5 decades: thin values (1e-15 m of sediment) would crush the scale.
+    logFloor_ = std::max(logFloor_, range_.max * 1e-5);
     for (const auto& category : meta.categories)
         categories_.push_back(materialColor(category));
 }
@@ -145,6 +151,15 @@ Rgb LayerPalette::color(float value) const {
         if (value >= 0.0f)
             return divergingColor(range_.max > 0.0f ? value / range_.max : 0.0f);
         return divergingColor(range_.min < 0.0f ? -value / range_.min : 0.0f);
+    case LayerStyle::LogScalar: {
+        // log10 between the smallest positive value and the maximum: dark to light blue
+        if (value <= 0.0f || range_.max <= 0.0f)
+            return {8, 12, 24};
+        const double low = std::log10(std::max(logFloor_, 1e-12)), high = std::log10(range_.max);
+        const double t = high > low ? std::clamp((std::log10(value) - low) / (high - low), 0.0, 1.0) : 1.0;
+        return mix(mix(Rgb{8, 12, 24}, Rgb{40, 110, 200}, static_cast<float>(std::min(1.0, t * 1.6))), Rgb{230, 245, 255},
+                   static_cast<float>(std::max(0.0, t * 2.5 - 1.5)));
+    }
     case LayerStyle::Categorical: {
         const auto id = static_cast<std::size_t>(std::max(0.0f, std::round(value)));
         return id < categories_.size() ? categories_[id] : materialColor(std::to_string(id));

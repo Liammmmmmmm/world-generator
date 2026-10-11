@@ -72,11 +72,19 @@ bool canRenderCrossSection(const WorldState& state) {
 
 CrossSectionImage renderCrossSection(const WorldState& state, const CrossSection& section, int width, int height) {
     const auto& params = state.params().values;
-    const Geology geology(params);
+    Geology geology(params);
+    std::vector<double> progress(params.tectonics.phases.size());
+    for (std::size_t k = 0; k < progress.size(); ++k)
+        progress[k] = state.scalar("phase_progress_" + std::to_string(k), 0.0);
+    geology.setPhaseProgress(std::move(progress));
     const double widthM = state.info().widthM(), lengthM = state.info().lengthM();
     const double sea = state.info().seaLevelM();
     const auto& h = state.layer(layers::kHeight);
-    const auto* cumUplift = state.hasLayer(layers::kCumUplift) ? &state.layer(layers::kCumUplift) : nullptr;
+    // Strata move with the uplift of the non-faulted phases, and with the
+    // faulted blocks as far as their phases went (see SimulationStage).
+    const auto* cumUplift = state.hasLayer(layers::kStrataUplift) ? &state.layer(layers::kStrataUplift)
+                            : state.hasLayer(layers::kCumUplift)  ? &state.layer(layers::kCumUplift)
+                                                                  : nullptr;
     const auto* hInitial = state.hasLayer(layers::kHeightInitial) ? &state.layer(layers::kHeightInitial) : nullptr;
     const bool volcanicStrata = params.origin.type == "volcanic" && hInitial;
 

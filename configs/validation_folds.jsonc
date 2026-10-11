@@ -1,0 +1,57 @@
+// Validation de l'étape 3, partie 2 : érosion différentielle. Une île ronde
+// soulevée par un large dôme, dans des strates plissées qui alternent une roche
+// dure (gneiss, erodibility 0.5) et une roche tendre (shale, 2.0), 60 m chacune. Le soulèvement est presque uniforme (dôme très
+// large, sans warp ni modulation) pour que seules les roches différencient le relief.
+// Attendu : des crêtes de gneiss et des vallées de shale alignées sur l'axe des
+// plis (30°) ; "surface_material" montre des bandes.
+{
+  "seed": 5,
+  "origin": { "type": "continental" },
+  "shape": { "lobe_count": 1, "lobe_spread": 0, "radius_ratio": 0.6, "elongation": 1.0, "bay_count": 0 },
+  "initial_topography": { "mode": "peneplain", "base_elevation_m": 10, "regional_dome_m": 20 },
+  "geology": {
+    "strata": [
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 },
+      { "material": "gneiss", "thickness_m": 60 },
+      { "material": "shale", "thickness_m": 60 }
+    ],
+    "strata_top_m": 300,
+    "basement_material": "granite",
+    "folding": { "enabled": true, "axis_angle_deg": 30, "wavelength_m": 700, "amplitude_m": 150,
+                 "asymmetry": 0, "plunge_deg": 0 },
+    "fault_count": 0, "intrusion_count": 0
+  },
+  "tectonics": { "uplift_warp_amplitude": 0, "uplift_modulation": 0,
+                 "phases": [ { "type": "dome", "center": [0, 0], "width_m": 20000,
+                               "rate_m_per_year": 3e-4, "start_years": -1e7, "end_years": 1e8 } ] },
+  "climate": { "base_precipitation_m_per_year": 1.0 },
+  "erosion": { "fluvial": { "k_base": 1e-5, "m": 0.5 }, "hillslope": { "diffusivity_m2_per_year": 0.005 } },
+  "simulation": { "coarse_resolution": 512, "total_duration_years": 2e6, "dt_years": 5000, "log_interval_steps": 40 }
+}

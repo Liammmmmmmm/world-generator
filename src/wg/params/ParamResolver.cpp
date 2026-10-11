@@ -92,6 +92,36 @@ void ParamResolver::record(const std::string& path, nlohmann::json value, ParamS
     entries_.push_back({path, std::move(value), source});
 }
 
+ParamSource ParamResolver::source(const std::string& path) const {
+    for (const ParamEntry& entry : entries_)
+        if (entry.path == path)
+            return entry.source;
+    return ParamSource::Default;
+}
+
+void ParamResolver::removeListElement(const std::string& listPath, const std::string& countPath, int index) {
+    const std::string prefix = listPath + "[";
+    std::erase_if(entries_, [&](const ParamEntry& entry) {
+        return entry.path.starts_with(prefix + std::to_string(index) + "]");
+    });
+    int count = 0;
+    for (ParamEntry& entry : entries_) {
+        if (entry.path == countPath) {
+            entry.value = entry.value.get<int>() - 1;
+            count = entry.value.get<int>();
+            continue;
+        }
+        if (!entry.path.starts_with(prefix))
+            continue;
+        const std::size_t close = entry.path.find(']', prefix.size());
+        const int i = std::stoi(entry.path.substr(prefix.size(), close - prefix.size()));
+        if (i > index)
+            entry.path = prefix + std::to_string(i - 1) + entry.path.substr(close);
+    }
+    if (count == 0)
+        record(listPath, nlohmann::json::array(), ParamSource::Seed);
+}
+
 // --- Random parameters -----------------------------------------------------------
 
 double ParamResolver::sample(const std::string& path, const std::function<double(double)>& f) {

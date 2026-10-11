@@ -11,6 +11,7 @@ enum class LayerStyle : std::uint8_t {
     Scalar,      // generic value, shown from its min to its max
     Height,      // elevation in meters: hypsometric colors, hillshade, sea below sea level
     Diverging,   // signed value centered on 0 (blue negative, red positive)
+    LogScalar,   // positive value spanning orders of magnitude (discharge), log scale
     Categorical, // integer ids indexing `categories`
 };
 

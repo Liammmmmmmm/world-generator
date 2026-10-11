@@ -7,6 +7,8 @@ namespace wg {
 
 void ParametersStage::run(WorldState& world, const StageContext& context) {
     world.setParams(context.config.params);
+    for (const std::string& note : context.config.params->notes)
+        context.log(note);
 }
 
 } // namespace wg

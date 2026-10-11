@@ -74,6 +74,16 @@ public:
     // Throws ConfigError if the config contains keys no parameter read.
     void checkNoUnknownKeys() const;
     std::vector<ParamEntry> takeEntries() { return std::move(entries_); }
+    // Source of an already resolved parameter (Default if never resolved).
+    ParamSource source(const std::string& path) const;
+    // Removes element `index` of a resolved list: its entries are dropped, the
+    // following elements move down one index and the count is decremented, so
+    // the resolved config (ResolvedParams::toJson) stays consistent.
+    void removeListElement(const std::string& listPath, const std::string& countPath, int index);
+    // A line explaining a decision taken during the resolution (logged by the
+    // parameters stage).
+    void note(std::string message) { notes_.push_back(std::move(message)); }
+    std::vector<std::string> takeNotes() { return std::move(notes_); }
 
     // Uniform [0, 1) value of the parameter's random stream.
     double unit(const std::string& path, int index = 0) const;
@@ -88,6 +98,7 @@ private:
     const nlohmann::json& config_;
     std::set<std::string> consumed_;
     std::vector<ParamEntry> entries_;
+    std::vector<std::string> notes_;
 };
 
 } // namespace wg

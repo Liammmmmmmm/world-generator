@@ -5,6 +5,7 @@
 #include "wg/gen/StageRegistry.hpp"
 #include "wg/gen/stages/IslandInitStage.hpp"
 #include "wg/gen/stages/ParametersStage.hpp"
+#include "wg/gen/stages/SimulationStage.hpp"
 
 namespace wg {
 
@@ -13,6 +14,7 @@ const StageRegistry& StageRegistry::builtin() {
         StageRegistry r;
         r.add<ParametersStage>("parameters");
         r.add<IslandInitStage>("island_init");
+        r.add<SimulationStage>("simulation");
         return r;
     }();
     return registry;
@@ -22,6 +24,7 @@ const std::vector<std::string>& StageRegistry::defaultPipeline() {
     static const std::vector<std::string> stages{
         "parameters",
         "island_init",
+        "simulation",
     };
     return stages;
 }

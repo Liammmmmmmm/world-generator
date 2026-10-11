@@ -15,6 +15,7 @@
 #include <numbers>
 
 #include "wg/core/Config.hpp"
+#include "wg/island/UpliftPattern.hpp"
 #include "wg/params/ParamResolver.hpp"
 
 namespace wg {
@@ -97,6 +98,11 @@ std::map<std::string, IslandParams::Material> parseMaterials(const nlohmann::jso
                               "' must be an object with numeric hardness, erodibility, talus_angle_deg "
                               "and a string sediment");
         }
+        const std::string& sediment = materials[name].sediment;
+        if (sediment != "gravel" && sediment != "sand" && sediment != "clay")
+            throw ConfigError("'" + path + ".sediment' must be \"gravel\", \"sand\" or \"clay\"");
+        if (materials[name].erodibility < 0.0)
+            throw ConfigError("'" + path + ".erodibility' must be >= 0");
     }
     return materials;
 }
@@ -141,13 +147,27 @@ void resolveOrigin(ParamResolver& r, IslandParams::Origin& o) {
     o.age = r.uniform("origin.age", 0.0, 1.0);
 }
 
-void resolveSimulation(ParamResolver& r, IslandParams::Simulation& s, const IslandParams::Origin& origin) {
+void resolveSimulation(ParamResolver& r, IslandParams& p) {
+    auto& s = p.simulation;
+    const auto& origin = p.origin;
     s.coarseResolution = r.whole("simulation.coarse_resolution", 1024);
-    // Old islands have been shaped for longer.
-    s.totalDurationYears =
-        r.sample("simulation.total_duration_years", [&](double u) { return logLerp(1e5, 2e7, (u + origin.age) / 2); });
+    // 0.2 to 2 Ma: longer for old islands, and for large ones (a small island is
+    // worn down sooner); the size counts from R = 500 m to 2 km.
+    const double size = std::clamp(std::log(p.islandRadiusM() / 500.0) / std::log(4.0), 0.0, 1.0);
+    s.totalDurationYears = r.sample("simulation.total_duration_years", [&](double u) {
+        return logLerp(2e5, 2e6, 0.5 * u + 0.25 * origin.age + 0.25 * size);
+    });
     s.dtYears = r.logUniform("simulation.dt_years", 500, 1e4);
     s.climateUpdateIntervalSteps = r.whole("simulation.climate_update_interval_steps", 10);
+    s.processes.uplift = r.flag("simulation.processes.uplift", true);
+    s.processes.climate = r.flag("simulation.processes.climate", true);
+    s.processes.glaciers = r.flag("simulation.processes.glaciers", true);
+    s.processes.fluvial = r.flag("simulation.processes.fluvial", true);
+    s.processes.hillslope = r.flag("simulation.processes.hillslope", true);
+    s.processes.marine = r.flag("simulation.processes.marine", true);
+    s.logIntervalSteps = r.whole("simulation.log_interval_steps", 100);
+    if (s.logIntervalSteps < 1 || s.coarseResolution < 8)
+        throw ConfigError("'simulation.log_interval_steps' must be >= 1 and 'simulation.coarse_resolution' >= 8");
     // boundary_depth_m depends on the island geometry: see resolveBathymetry.
 }
 
@@ -310,6 +330,17 @@ void resolveInitialTopography(ParamResolver& r, IslandParams& p) {
     t.noise.octaves = r.integer("initial_topography.noise.octaves", 3, 7);
     t.noise.lacunarity = r.number("initial_topography.noise.lacunarity", 2.0);
     t.noise.gain = r.number("initial_topography.noise.gain", 0.5);
+    // No flat land at the start: a regional dome (not for atolls and barriers,
+    // flat by nature) and a multi-scale roughness.
+    const bool flatByNature = t.mode == "atoll" || t.mode == "barrier";
+    t.regionalDomeM = r.sample("initial_topography.regional_dome_m", [&](double u) {
+        return perOrigin<Range>(origin.type, {{{5, 15}, {10, 30}, {5, 15}, {5, 10}}}).at(u);
+    });
+    t.roughnessM = r.sample("initial_topography.roughness_m", [&](double u) {
+        return flatByNature ? lerp(0.5, 1.0, u) : perOrigin<Range>(origin.type, {{{3, 8}, {4, 10}, {2, 6}, {2, 4}}}).at(u);
+    });
+    t.roughnessFrequency = r.uniform("initial_topography.roughness_frequency", 4.0, 8.0);
+    t.roughnessOctaves = r.integer("initial_topography.roughness_octaves", 4, 6);
 
     auto& v = t.volcano;
     v.count = r.integer("initial_topography.volcano.count", 1, 3);
@@ -465,8 +496,10 @@ void resolveGeology(ParamResolver& r, IslandParams::Geology& g, const IslandPara
 }
 
 // Faults along the edges of block_uplift and horst_graben phases, raising the
-// uplifted side by the phase's total uplift, so that strata offsets match the
-// topographic scarps.
+// uplifted side by the phase's total uplift. These are the nominal walls,
+// listed for information: the geology moves the blocks between walls that
+// follow the warped outline of the pattern (UpliftPattern), which these
+// straight traces only approximate.
 std::vector<IslandParams::Fault> phaseFaults(const IslandParams::TectonicPhase& phase, double radius) {
     std::vector<IslandParams::Fault> faults;
     const double axis = phase.angleDeg * std::numbers::pi / 180.0;
@@ -485,11 +518,11 @@ std::vector<IslandParams::Fault> phaseFaults(const IslandParams::TectonicPhase& 
         add(-phase.lengthM / 2, 0, -90, phase.widthM, uplift);
     } else if (phase.type == "horst_graben") {
         // Band k covers v in [k w, (k+1) w], a horst (+1) for even k; the horst
-        // side of a boundary is raised by 2 * uplift (+U vs -U). Only boundaries
+        // side of a boundary is raised by (1 + negative_factor) * uplift. Only boundaries
         // whose trace crosses the island (within R of the map center) are kept.
         const int reach = static_cast<int>(std::ceil(2.0 * radius / phase.widthM));
         for (int k = -reach; k <= reach; ++k) {
-            add(0, k * phase.widthM, k % 2 == 0 ? 0 : 180, phase.lengthM, 2.0 * uplift);
+            add(0, k * phase.widthM, k % 2 == 0 ? 0 : 180, phase.lengthM, (1.0 + phase.negativeFactor) * uplift);
             const auto& f = faults.back();
             const double a = f.angleDeg * std::numbers::pi / 180.0;
             const double along = std::clamp(-(f.x * std::cos(a) + f.y * std::sin(a)), -f.lengthM / 2, f.lengthM / 2);
@@ -500,53 +533,196 @@ std::vector<IslandParams::Fault> phaseFaults(const IslandParams::TectonicPhase& 
     return faults;
 }
 
+// Rough mean initial altitude of the land (m), from the initial topography
+// parameters (the actual relief is only built by the island initialization).
+double meanInitialElevation(const IslandParams& p) {
+    const auto& t = p.initialTopography;
+    if (t.mode == "atoll")
+        return t.atoll.ringHeightM;
+    if (t.mode == "barrier")
+        return t.baseElevationM + 0.5 * t.barrier.crestHeightM;
+    const double dome = 0.4 * t.regionalDomeM; // mean of the dome over the island
+    if (t.mode == "volcanic_cone")
+        return t.baseElevationM + 0.25 * t.volcano.heightM + dome;
+    return t.baseElevationM + dome;
+}
+
+// Mean over the island of each phase's total uplift (rate x duration x
+// pattern), in meters. The island is approximated by the ellipse of its shape
+// parameters: half-length R along the main axis, R / elongation across.
+std::vector<double> meanPhaseUplift(const IslandParams& p) {
+    constexpr int kSamples = 48;
+    const double R = p.islandRadiusM();
+    const double axis = p.shape.mainAxisDeg * std::numbers::pi / 180.0;
+    std::vector<double> means;
+    for (std::size_t k = 0; k < p.tectonics.phases.size(); ++k) {
+        const auto& phase = p.tectonics.phases[k];
+        const UpliftPattern pattern(p, static_cast<int>(k));
+        double sum = 0.0;
+        int count = 0;
+        for (int j = 0; j < kSamples; ++j) {
+            for (int i = 0; i < kSamples; ++i) {
+                const double u = (2.0 * (i + 0.5) / kSamples - 1.0), v = (2.0 * (j + 0.5) / kSamples - 1.0);
+                if (u * u + v * v > 1.0)
+                    continue;
+                const double along = u * R, across = v * R / p.shape.elongation;
+                sum += pattern.value(along * std::cos(axis) - across * std::sin(axis),
+                                     along * std::sin(axis) + across * std::cos(axis));
+                ++count;
+            }
+        }
+        means.push_back(phase.rateMPerYear * (phase.endYears - phase.startYears) * sum / std::max(count, 1));
+    }
+    return means;
+}
+
 // Tectonics by origin: volcanic islands get at most a weak dome, sedimentary
-// and coral islands at most a weak subsidence, continental ones the full
-// palette. Block and horst edges are narrow.
+// and coral islands at most a weak subsidence, continental ones mostly
+// collisions and domes, never a subsidence (unless forced). Block and horst
+// edges are narrow, but never under 10 % of the phase width.
+// Steady-state relief (m) per unit of U / K at P = 1 m/yr, m = 0.45, for an
+// island of R ~ 1.2 km on cells of 4 m: `wgen --calibrate --resolution 1024`
+// gives a 99th percentile of the land altitude of 9.1 to 10.5 times U / K
+// over U in [1e-4, 1e-3] and k_base in [1e-6, 3e-5].
+constexpr double kSteadyReliefM = 10.0;
+
 void resolveTectonics(ParamResolver& r, IslandParams& p) {
     auto& t = p.tectonics;
     const auto& origin = p.origin;
     const double duration = p.simulation.totalDurationYears;
     const double radius = p.islandRadiusM();
-    // Young islands are still actively uplifting.
-    t.maxUpliftRateMPerYear = r.sample("tectonics.max_uplift_rate_m_per_year",
-                                       [&](double u) { return logLerp(1e-5, 5e-3, (u + 1.0 - origin.age) / 2); });
+    // Uplift follows the erodibility. The steady-state relief of rivers under
+    // an uplift U is about kSteadyReliefM * (U / K) * P^-m (wgen --calibrate),
+    // so independent draws of U and k_base, over 2 and 3 orders of magnitude,
+    // gave reliefs from a few meters (the island worn flat within a few
+    // hundred ka) to kilometers. A relief is drawn instead (young islands are
+    // higher), and the maximum rate derived from it. With a low K the steady
+    // state takes 5 to 15 Ma (longer than any run): the rate must then also
+    // build that relief within the run, U >= relief / duration.
+    // (The hillslopes, absent from the calibration, then lower the actual
+    // relief by a factor of 2 to 5: slopes are capped at their repose angle.)
+    t.targetReliefM = r.sample("tectonics.target_relief_m", [&](double u) {
+        const double v = (u + 1.0 - origin.age) / 2.0;
+        // A volcano: about the height of its cone (a growing one keeps its size).
+        return origin.type == "continental" ? logLerp(150, 1500, v)
+               : origin.type == "volcanic"  ? p.initialTopography.volcano.heightM * lerp(0.5, 1.0, v)
+                                            : logLerp(5, 30, v);
+    });
+    const auto& fluvial = p.erosion.fluvial;
+    const double steadyReliefPerUK = kSteadyReliefM * std::pow(p.climate.basePrecipitationMPerYear, -fluvial.m);
+    t.maxUpliftRateMPerYear = r.sample("tectonics.max_uplift_rate_m_per_year", [&](double) {
+        const double rate = t.targetReliefM * std::max(fluvial.kBase / steadyReliefPerUK, 1.0 / duration);
+        return std::clamp(rate, 1e-5, 1e-2);
+    });
+    t.upliftWarpAmplitude = r.uniform("tectonics.uplift_warp_amplitude", 0.1, 0.25);
+    t.upliftWarpFrequency = r.uniform("tectonics.uplift_warp_frequency", 0.7, 1.5);
+    t.upliftModulation = r.uniform("tectonics.uplift_modulation", 0.3, 0.6);
+    t.upliftModulationFrequency = r.number("tectonics.uplift_modulation_frequency", 2.0);
 
     const auto types = byOrigin(origin.type, {{
                                                  {{"dome", 1.0}},
-                                                 {{"collision", 0.3}, {"horst_graben", 0.15}, {"block_uplift", 0.2},
-                                                  {"tilt", 0.15}, {"dome", 0.1}, {"subsidence", 0.1}},
+                                                 {{"collision", 0.4}, {"dome", 0.3}, {"tilt", 0.1},
+                                                  {"block_uplift", 0.1}, {"horst_graben", 0.1}},
                                                  {{"subsidence", 1.0}},
                                                  {{"subsidence", 1.0}},
                                              }});
-    const auto [minCount, maxCount] = perOrigin<std::pair<int, int>>(origin.type, {{{0, 1}, {1, 4}, {0, 1}, {0, 1}}});
+    // Most continental islands are still rising: their last uplift phase lasts
+    // to the end (it starts in the first fifth of the run). So are young
+    // volcanoes (a dome: magmatic inflation and new flows). The others are
+    // "old" islands, worn down once their phases are over.
+    const double ongoingChance = origin.type == "continental" ? 0.75 : origin.type == "volcanic" ? 1.0 - origin.age : 0.0;
+    t.ongoingUplift = r.chance("tectonics.ongoing_uplift", ongoingChance);
+    auto [minCount, maxCount] = perOrigin<std::pair<int, int>>(origin.type, {{{0, 1}, {1, 4}, {0, 1}, {0, 1}}});
+    if (t.ongoingUplift)
+        minCount = std::max(minCount, 1); // a growing volcano has its dome
     const Range strength = perOrigin<Range>(origin.type, {{{0.05, 0.3}, {0.2, 1.0}, {0.05, 0.3}, {0.05, 0.3}}});
+    // A subsidence must not sink more than half of the island's mean initial
+    // altitude (low islands would drown under the slightest one).
+    const double maxSubsidenceM = 0.5 * std::max(meanInitialElevation(p), 0.0);
+    // Diameter of the island (the ellipse of meanPhaseUplift) along a direction.
+    const auto diameter = [&](double angleDeg) {
+        const double a = (angleDeg - p.shape.mainAxisDeg) * std::numbers::pi / 180.0;
+        return 2.0 * std::hypot(radius * std::cos(a), radius / p.shape.elongation * std::sin(a));
+    };
     const int count = r.listSize("tectonics.phases", "tectonics.phase_count", minCount, maxCount);
+    std::vector<std::string> phaseTypes;
+    for (int i = 0; i < count; ++i)
+        phaseTypes.push_back(r.pick(at("tectonics.phases", i, "type"), types,
+                                    {"collision", "dome", "horst_graben", "block_uplift", "tilt", "subsidence"}));
+    int ongoing = -1;
+    for (int i = 0; i < count; ++i)
+        if (phaseTypes[i] == "collision" || phaseTypes[i] == "dome" || phaseTypes[i] == "block_uplift")
+            ongoing = t.ongoingUplift ? i : -1;
     bool collisionSeen = false;
     for (int i = 0; i < count; ++i) {
         const std::string list = "tectonics.phases";
         IslandParams::TectonicPhase phase;
-        phase.type = r.pick(at(list, i, "type"), types,
-                            {"collision", "dome", "horst_graben", "block_uplift", "tilt", "subsidence"});
-        phase.startYears = r.uniform(at(list, i, "start_years"), 0, 0.8 * duration);
-        phase.endYears = r.sample(at(list, i, "end_years"), [&](double u) {
-            return std::min(duration, phase.startYears + lerp(0.1, 0.6, u) * duration);
+        phase.type = phaseTypes[i];
+        phase.startYears = r.sample(at(list, i, "start_years"), [&](double u) {
+            return (i == ongoing ? 0.2 : 0.8) * duration * u;
         });
-        phase.rateMPerYear = r.sample(at(list, i, "rate_m_per_year"),
-                                      [&](double u) { return t.maxUpliftRateMPerYear * strength.at(u); });
+        phase.endYears = r.sample(at(list, i, "end_years"), [&](double u) {
+            return i == ongoing ? duration : std::min(duration, phase.startYears + lerp(0.1, 0.6, u) * duration);
+        });
+        phase.rateMPerYear = r.sample(at(list, i, "rate_m_per_year"), [&](double u) {
+            // the ongoing phase is the main active one
+            const double rate = t.maxUpliftRateMPerYear * (i == ongoing ? lerp(0.6, 1.0, u) : strength.at(u));
+            const double span = phase.endYears - phase.startYears;
+            if (phase.type == "subsidence" && origin.type != "continental" && span > 0.0)
+                return std::min(rate, maxSubsidenceM / span);
+            return rate;
+        });
         phase.center = r.point(at(list, i, "center"), -0.6 * radius, 0.6 * radius, -0.6 * radius, 0.6 * radius);
         // The first collision builds the island's main axis.
         const bool mainCollision = phase.type == "collision" && !collisionSeen;
         collisionSeen = collisionSeen || phase.type == "collision";
         phase.angleDeg = r.sample(at(list, i, "angle_deg"), [&](double u) { return mainCollision ? p.shape.mainAxisDeg : 180.0 * u; });
-        phase.lengthM = r.sample(at(list, i, "length_m"), [&](double u) { return radius * lerp(0.8, 2.0, u); });
-        phase.widthM = r.sample(at(list, i, "width_m"), [&](double u) { return radius * lerp(0.2, 0.8, u); });
+        // At most 1.2 times the island's diameter in each direction.
+        phase.lengthM = r.sample(at(list, i, "length_m"), [&](double u) {
+            return std::min(radius * lerp(0.8, 2.0, u), 1.2 * diameter(phase.angleDeg));
+        });
+        phase.widthM = r.sample(at(list, i, "width_m"), [&](double u) {
+            return std::min(radius * lerp(0.2, 0.8, u), 1.2 * diameter(phase.angleDeg + 90.0));
+        });
         const bool sharp = phase.type == "block_uplift" || phase.type == "horst_graben";
-        phase.falloff = r.sample(at(list, i, "falloff"), [&](double u) { return sharp ? lerp(0.05, 0.2, u) : lerp(0.2, 1.0, u); });
+        phase.falloff = r.sample(at(list, i, "falloff"), [&](double u) { return sharp ? lerp(0.2, 0.35, u) : lerp(0.2, 1.0, u); });
         phase.faultDipDeg = r.uniform(at(list, i, "fault_dip_deg"), 55, 80);
-        if (phase.rateMPerYear < 0.0 || phase.widthM <= 0.0 || phase.lengthM <= 0.0 || phase.falloff <= 0.0)
-            throw ConfigError("'" + at(list, i, "") + "': rate must be >= 0, width, length and falloff > 0");
+        // A tilt or a horst_graben raises more than it lowers: the island must
+        // not sink because of a tilt.
+        phase.negativeFactor = r.number(at(list, i, "negative_factor"), 0.3);
+        if (phase.rateMPerYear < 0.0 || phase.widthM <= 0.0 || phase.lengthM <= 0.0 || phase.falloff <= 0.0 ||
+            phase.negativeFactor < 0.0)
+            throw ConfigError("'" + at(list, i, "") + "': rate and negative_factor must be >= 0, width, length and falloff > 0");
         t.phases.push_back(phase);
+    }
+
+    // Check: the island must not sink on average. While the mean total uplift
+    // over the island is below the allowed sinking (none for a continental
+    // island, the capped subsidence for the others), the phase that lowers it
+    // most is dropped (never one whose type the config forces).
+    const double allowedSinkingM = origin.type == "continental" ? 0.0 : maxSubsidenceM;
+    for (std::vector<double> means = meanPhaseUplift(p);;) {
+        double total = 0.0;
+        for (double m : means)
+            total += m;
+        if (total >= -allowedSinkingM - 1e-9)
+            break;
+        int worst = -1;
+        for (std::size_t k = 0; k < means.size(); ++k)
+            if (means[k] < 0.0 && r.source(at("tectonics.phases", k, "type")) != ParamSource::Config &&
+                (worst < 0 || means[k] < means[worst]))
+                worst = static_cast<int>(k);
+        if (worst < 0) {
+            r.note("tectonics: the island sinks on average (" + std::to_string(total) +
+                   " m of uplift), kept: the config forces the lowering phases");
+            break;
+        }
+        r.note("tectonics: phase " + std::to_string(worst) + " (" + t.phases[worst].type +
+               ") dropped: the mean uplift over the island was " + std::to_string(total) + " m, " +
+               std::to_string(means[worst]) + " m from that phase");
+        t.phases.erase(t.phases.begin() + worst);
+        r.removeListElement("tectonics.phases", "tectonics.phase_count", worst);
+        means = meanPhaseUplift(p); // the following phases changed index, so their noises
     }
 
     // Derived faults: always recomputed from the phases (a "geology.derived_faults"
@@ -562,6 +738,39 @@ void resolveTectonics(ParamResolver& r, IslandParams& p) {
                      ParamSource::Seed);
             p.geology.faults.push_back(fault);
         }
+    }
+}
+
+// Multipliers of the process coefficients by origin: sedimentary islands
+// (soft, flat) erode less by rivers and more at the coast, where the sea
+// carries their sand further; coral islands hardly have rivers. Both are low
+// sand islands, which the hillslope diffusion would spread into the sea within
+// a few hundred ka: the waves and the wind that keep feeding them sand are not
+// modelled, so their diffusion is reduced.
+void resolveProcessMultipliers(ParamResolver& r, IslandParams& p) {
+    struct Defaults {
+        const char* origin;
+        IslandParams::ProcessMultipliers values;
+    };
+    const Defaults table[] = {
+        {"volcanic", {1.0, 1.0, 1.0, 1.0, 1.0, 1.0}},
+        {"continental", {1.0, 1.0, 1.0, 1.0, 1.0, 1.0}},
+        {"sedimentary", {0.5, 0.2, 1.0, 1.5, 2.0, 1.0}},
+        {"coral", {0.05, 0.2, 1.0, 1.0, 1.0, 1.0}},
+    };
+    for (const auto& [origin, d] : table) {
+        const std::string base = std::string("process_multipliers.") + origin + ".";
+        IslandParams::ProcessMultipliers m;
+        m.fluvial = r.number(base + "fluvial", d.fluvial);
+        m.hillslope = r.number(base + "hillslope", d.hillslope);
+        m.thermal = r.number(base + "thermal", d.thermal);
+        m.marine = r.number(base + "marine", d.marine);
+        m.marineDiffusion = r.number(base + "marine_diffusion", d.marineDiffusion);
+        m.glacial = r.number(base + "glacial", d.glacial);
+        for (double v : {m.fluvial, m.hillslope, m.thermal, m.marine, m.marineDiffusion, m.glacial})
+            if (v < 0.0)
+                throw ConfigError("'" + base + "*' must be >= 0");
+        p.processMultipliers[origin] = m;
     }
 }
 
@@ -585,6 +794,11 @@ void resolveClimate(ParamResolver& r, IslandParams::Climate& c) {
     c.orographic.condensationRate = r.uniform("climate.orographic.condensation_rate", 0.2, 1.0);
     c.orographic.rainShadowStrength = r.uniform("climate.orographic.rain_shadow_strength", 0.2, 0.9);
     c.orographic.moistureRechargeOverSea = r.uniform("climate.orographic.moisture_recharge_over_sea", 0.05, 0.5);
+    c.orographic.q0 = r.number("climate.orographic.q0", 1.0);
+    c.orographic.baseRate = r.uniform("climate.orographic.base_rate", 0.02, 0.1);
+    if (c.orographic.q0 <= 0.0 || c.orographic.baseRate <= 0.0 || c.orographic.condensationRate < 0.0 ||
+        c.orographic.moistureRechargeOverSea < 0.0)
+        throw ConfigError("'climate.orographic': q0 and base_rate must be > 0, the other rates >= 0");
 }
 
 void resolveTimeline(ParamResolver& r, IslandParams::Timeline& t, const IslandParams::Climate& climate,
@@ -644,26 +858,75 @@ void resolveErosion(ParamResolver& r, IslandParams::Erosion& e, const IslandPara
     fl.n = r.number("erosion.fluvial.n", 1.0);
     fl.depositionG = r.uniform("erosion.fluvial.deposition_g", 0, 2);
     fl.precipitationWeighted = r.flag("erosion.fluvial.precipitation_weighted", true);
+    fl.kSedimentMult = r.number("erosion.fluvial.k_sediment_mult", 5.0);
+    fl.depositionTolerance = r.number("erosion.fluvial.deposition_tolerance", 1e-3);
+    fl.depositionMaxIterations = r.whole("erosion.fluvial.deposition_max_iterations", 20);
+    auto& md = e.marineDiffusion;
+    // Scaled to these maps (a few km): published values (~100-1000 m2/yr) are
+    // for margins a hundred times larger, and D scales with length squared.
+    md.sandD0 = r.logUniform("erosion.marine_diffusion.sand_d0", 0.05, 1.0);
+    md.finesD0 = r.sample("erosion.marine_diffusion.fines_d0", [&](double u) { return md.sandD0 * lerp(5.0, 20.0, u); });
+    md.depthScaleM = r.uniform("erosion.marine_diffusion.depth_scale_m", 15.0, 60.0);
+    md.mobileLayerM = r.number("erosion.marine_diffusion.mobile_layer_m", 1.0);
+    if (fl.depositionG < 0.0 || fl.depositionTolerance <= 0.0 || fl.depositionMaxIterations < 1 || md.sandD0 < 0.0 ||
+        md.finesD0 < 0.0 || md.depthScaleM <= 0.0 || md.mobileLayerM <= 0.0)
+        throw ConfigError("'erosion': deposition_g >= 0, deposition_tolerance > 0, deposition_max_iterations >= 1, "
+                          "marine_diffusion d0 >= 0 and depth_scale_m > 0");
 
     e.hillslope.diffusivityM2PerYear = r.logUniform("erosion.hillslope.diffusivity_m2_per_year", 1e-3, 1e-1);
 
     e.thermal.iterationsPerStep = r.whole("erosion.thermal.iterations_per_step", 1);
-    e.thermal.rate = r.uniform("erosion.thermal.rate", 0.05, 0.5);
+    e.thermal.rate = r.number("erosion.thermal.rate", 0.5);
+    e.thermal.sedimentTalusAngleDeg = r.number("erosion.thermal.sediment_talus_angle_deg", 33.0);
+    if (fl.kSedimentMult < 0.0 || e.thermal.rate < 0.0 || e.thermal.rate > 1.0 ||
+        e.thermal.sedimentTalusAngleDeg <= 0.0 || e.thermal.sedimentTalusAngleDeg >= 90.0 ||
+        e.thermal.iterationsPerStep < 0 || e.hillslope.diffusivityM2PerYear < 0.0)
+        throw ConfigError("'erosion': k_sediment_mult and diffusivity must be >= 0, thermal.rate in [0, 1], "
+                          "sediment_talus_angle_deg in ]0, 90[, iterations_per_step >= 0");
 
     auto& gl = e.glacial;
-    gl.accumulationRate = r.uniform("erosion.glacial.accumulation_rate", 0.1, 2.0);
-    gl.ablationGradient = r.uniform("erosion.glacial.ablation_gradient", 0.002, 0.01);
-    gl.deformationCoeff = r.logUniform("erosion.glacial.deformation_coeff", 5e-17, 5e-16);
-    gl.slidingCoeff = r.logUniform("erosion.glacial.sliding_coeff", 1e-4, 1e-2);
-    gl.erosionCoeff = r.logUniform("erosion.glacial.erosion_coeff", 1e-5, 1e-3);
+    gl.accumulationRate = r.uniform("erosion.glacial.accumulation_rate", 0.5, 1.5);
+    gl.ablationGradient = r.uniform("erosion.glacial.ablation_gradient", 0.3, 1.5);
+    r.markConsumed("erosion.glacial.deformation_coeff"); // replaced by glen_A
+    // tau_b ~ 1e5 Pa under 100 m of ice on a 10 % slope: sliding of ~5 to 100 m/yr.
+    gl.slidingCoeff = r.logUniform("erosion.glacial.sliding_coeff", 5e-10, 1e-8);
+    // ~1 mm/yr under ice sliding at 50 m/yr (observed rates: 0.1 to 10 mm/yr).
+    gl.erosionCoeff = r.logUniform("erosion.glacial.erosion_coeff", 5e-6, 5e-5);
     gl.erosionExponent = r.number("erosion.glacial.erosion_exponent", 1.0);
+    gl.glenA = r.number("erosion.glacial.glen_A", 2.4e-24);
+    gl.iceDensity = r.number("erosion.glacial.ice_density", 917.0);
+    gl.snowTemperatureC = r.number("erosion.glacial.snow_temperature_c", 0.0);
+    gl.maxSubsteps = r.whole("erosion.glacial.max_substeps", 5000);
+    gl.convergenceTol = r.number("erosion.glacial.convergence_tol", 0.01);
+    gl.iceThresholdM = r.number("erosion.glacial.ice_threshold_m", 5.0);
+    gl.calvingDepthM = r.number("erosion.glacial.calving_depth_m", 30.0);
+    gl.iceGridCellM = r.number("erosion.glacial.ice_grid_cell_m", 50.0);
+    if (gl.glenA <= 0.0 || gl.iceDensity <= 0.0 || gl.maxSubsteps < 1 || gl.convergenceTol <= 0.0 ||
+        gl.iceThresholdM < 0.0 || gl.calvingDepthM < 0.0 || gl.iceGridCellM <= 0.0 || gl.slidingCoeff < 0.0 ||
+        gl.erosionCoeff < 0.0 || gl.ablationGradient < 0.0 || gl.accumulationRate < 0.0)
+        throw ConfigError("'erosion.glacial': glen_A, ice_density, convergence_tol, ice_grid_cell_m > 0, "
+                          "max_substeps >= 1, the other coefficients >= 0");
+    auto& reef = e.reef;
+    reef.enabled = r.flag("erosion.reef.enabled", true);
+    reef.growthRate = r.logUniform("erosion.reef.growth_rate", 2e-3, 1e-2);
+    reef.maxDepthM = r.uniform("erosion.reef.max_depth", 10, 30);
 
     auto& co = e.coastal;
-    co.waveErosionCoeff = r.logUniform("erosion.coastal.wave_erosion_coeff", 1e-5, 1e-3);
+    // m2 of cliff section per year and per meter of coast: a 20 m cliff of
+    // hardness 0.5 facing the swell over deep water retreats by ~1 mm to 0.1 m/yr
+    // (then slower as its platform widens).
+    co.waveErosionCoeff = r.logUniform("erosion.coastal.wave_erosion_coeff", 0.01, 1.0);
     co.fetchRayCount = r.whole("erosion.coastal.fetch_ray_count", 32);
     co.fetchMaxDistanceM = r.uniform("erosion.coastal.fetch_max_distance_m", 2000, 20000);
-    co.platformDepthM = r.uniform("erosion.coastal.platform_depth_m", -15, -3);
+    co.platformDepthM = r.uniform("erosion.coastal.platform_depth_m", 3, 15);
     co.sedimentExportThreshold = r.uniform("erosion.coastal.sediment_export_threshold", 0.3, 0.9);
+    co.exposureUpdateIntervalSteps = r.whole("erosion.coastal.exposure_update_interval_steps", 10);
+    co.platformAttenuationM = r.number("erosion.coastal.platform_attenuation_m", 200.0);
+    co.sedimentHardness = r.number("erosion.coastal.sediment_hardness", 0.1);
+    if (co.waveErosionCoeff < 0.0 || co.platformDepthM < 0.0 || co.exposureUpdateIntervalSteps < 1 ||
+        co.sedimentHardness <= 0.0 || co.fetchRayCount < 1 || co.fetchMaxDistanceM <= 0.0)
+        throw ConfigError("'erosion.coastal': coefficients >= 0, platform_depth_m >= 0 (below sea level), "
+                          "intervals and ray count >= 1, sediment_hardness and fetch > 0");
 
     auto& dh = e.detailHydraulic;
     dh.method = r.text("erosion.detail_hydraulic.method", "droplet", {"droplet", "pipe"});
@@ -741,7 +1004,7 @@ void resolveRest(ParamResolver& r, IslandParams& p) {
 // Top-level order of the resolved JSON (matches island_params.jsonc).
 constexpr std::array kSectionOrder{
     "seed",      "world",      "simulation", "origin",          "shape",   "initial_topography",
-    "geology",   "tectonics",  "climate",    "timeline",        "erosion", "hydrology",
+    "geology",   "tectonics",  "climate",    "timeline",        "erosion", "process_multipliers", "hydrology",
     "present_climate", "soil", "biomes",     "voxelization",    "caves",   "vegetation",
     "structures", "debug",
 };
@@ -761,18 +1024,20 @@ ResolvedParams resolveIslandParams(std::uint64_t seed, const nlohmann::json& con
 
     // Resolution order follows dependencies, not the file order.
     IslandParams p;
+    p.seed = seed;
     resolveWorld(r, p.world);
     resolveOrigin(r, p.origin);
     resolveShape(r, p);
-    resolveSimulation(r, p.simulation, p.origin);
+    resolveSimulation(r, p);
     resolveBathymetry(r, p);
     resolveInitialTopography(r, p);
+    resolveClimate(r, p.climate);
+    resolveErosion(r, p.erosion, p.climate, p.world); // before tectonics: uplift rates follow k_base
     resolveTectonics(r, p); // before geology: intrusions follow the collision, derived faults
     resolveGeology(r, p.geology, p.origin, p.islandRadiusM(), p.shape.mainAxisDeg, p.tectonics);
-    resolveClimate(r, p.climate);
     resolveTimeline(r, p.timeline, p.climate, p.simulation);
-    resolveErosion(r, p.erosion, p.climate, p.world);
     resolveHydrology(r, p.hydrology);
+    resolveProcessMultipliers(r, p);
     resolveRest(r, p);
     r.checkNoUnknownKeys();
 
@@ -786,7 +1051,7 @@ ResolvedParams resolveIslandParams(std::uint64_t seed, const nlohmann::json& con
     std::stable_sort(entries.begin(), entries.end(),
                      [&](const ParamEntry& a, const ParamEntry& b) { return sectionRank(a.path) < sectionRank(b.path); });
 
-    return ResolvedParams{std::move(p), std::move(entries), config};
+    return ResolvedParams{std::move(p), std::move(entries), config, r.takeNotes()};
 }
 
 nlohmann::ordered_json ResolvedParams::toJson() const {

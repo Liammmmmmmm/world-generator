@@ -1,0 +1,24 @@
+// Validation de l'étape 3, partie 3 : dépôt fluvial (Yuan et al. 2019) et
+// diffusion marine. Une île continentale soulevée par une chaîne et un dôme, avec
+// des strates tendres et dures, G = 1.
+// Attendu : des plaines à fond plat dans les vallées larges, des cônes au pied
+// des reliefs ("deposition_rate", "sediment"), des deltas devant les embouchures
+// (sable près de la côte, argile plus loin : "sediment_dominant"), un plateau
+// qui se remplit, et un bilan "budget" exact dans les logs.
+{
+  "seed": 12,
+  "origin": { "type": "continental" },
+  "shape": { "lobe_count": 2, "radius_ratio": 0.5, "elongation": 1.6, "bay_count": 2 },
+  "initial_topography": { "mode": "peneplain", "base_elevation_m": 15, "regional_dome_m": 20 },
+  "geology": { "fault_count": 0, "intrusion_count": 0,
+               "strata": [ { "material": "sandstone", "thickness_m": 80 }, { "material": "shale", "thickness_m": 60 },
+                           { "material": "limestone", "thickness_m": 120 }, { "material": "schist", "thickness_m": 200 } ],
+               "basement_material": "granite" },
+  "tectonics": { "phases": [ { "type": "collision", "start_years": -1e7, "end_years": 1e8, "rate_m_per_year": 8e-4 },
+                             { "type": "dome", "start_years": -1e7, "end_years": 1e8, "rate_m_per_year": 2e-4 } ] },
+  "climate": { "base_precipitation_m_per_year": 1.2 },
+  "erosion": { "fluvial": { "k_base": 1e-5, "m": 0.5, "deposition_g": 1.0 },
+               "hillslope": { "diffusivity_m2_per_year": 0.01 } },
+  "timeline": { "glaciation_count": 0 },
+  "simulation": { "coarse_resolution": 512, "total_duration_years": 1.5e6, "dt_years": 5000, "log_interval_steps": 50 }
+}

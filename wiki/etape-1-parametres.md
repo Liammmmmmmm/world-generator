@@ -94,9 +94,9 @@ Une distribution peut dépendre de paramètres **déjà résolus**, et elle util
 valeur **finale** (override comprise) :
 
 ```cpp
-// la durée dépend de l'âge : une vieille île a été façonnée plus longtemps
+// la durée dépend de l'âge et de la taille : une vieille et grande île a été façonnée plus longtemps
 s.totalDurationYears = r.sample("simulation.total_duration_years",
-    [&](double u) { return logLerp(1e5, 2e7, (u + origin.age) / 2); });
+    [&](double u) { return logLerp(2e5, 2e6, 0.5 * u + 0.25 * origin.age + 0.25 * size); });
 ```
 
 Le nombre de tirages ne change pas (toujours un `u` par paramètre) ; seule la transformation
@@ -107,8 +107,10 @@ Les principales dépendances :
 
 | Paramètre | Dépend de |
 |-----------|-----------|
-| `simulation.total_duration_years` | `origin.age` (vieux = plus long) |
-| `tectonics.max_uplift_rate_m_per_year` | `origin.age` (jeune = plus actif) |
+| `simulation.total_duration_years` | `origin.age` (vieux = plus long), rayon de l'île (grande = plus long) |
+| `tectonics.target_relief_m` | `origin.type`, `origin.age` (jeune = plus haut) |
+| `tectonics.max_uplift_rate_m_per_year` | `target_relief_m`, `erosion.fluvial.k_base`, `m`, `climate.base_precipitation_m_per_year` : le soulèvement suit l'érodabilité (voir l'[étape 3](etape-3-simulation.md), § 19) |
+| `tectonics.phases[i].start_years`, `end_years` | `tectonics.ongoing_uplift` : la dernière phase de soulèvement dure jusqu'à la fin |
 | `initial_topography.mode`, `base_elevation_m` | `origin.type` |
 | `geology.strata[i].material`, `basement_material`, `folding.enabled`, nombre de failles et d'intrusions | `origin.type` |
 | `tectonics.phases[i].type` | `origin.type` |
@@ -122,9 +124,18 @@ Les principales dépendances :
 | `timeline.glaciation_count` | température (plus froid = plus de glaciations) |
 | `erosion.aeolian.enabled` | humidité, vent |
 | `initial_topography.volcano.crater_depth_m`, `min_spacing_m` | `height_m`, `radius_m` |
+| `initial_topography.regional_dome_m`, `roughness_m` | `origin.type`, `initial_topography.mode` (atoll et barrier : rugosité faible) |
+| `tectonics.phases[i].rate_m_per_year` (subsidence, île non continentale) | durée de la phase, altitude moyenne initiale estimée (au plus 50 % de celle-ci) |
+| `tectonics.phases[i].length_m`, `width_m` | diamètre de l'île dans leur direction (`shape.elongation`, `main_axis_deg`) |
+
+**Rejets.** Une seule règle retire un élément tiré après coup : une phase tectonique qui fait
+couler l'île en moyenne (voir l'[étape 2](etape-2-initialisation.md), 3.5).
+`ParamResolver::removeListElement` retire alors ses entrées et renumérote les suivantes, pour
+que `toJson()` reste exact, et `ParamResolver::note` explique le retrait dans le journal de
+l'étape `parameters`.
 
 L'ordre d'appel dans `resolveIslandParams` suit ces dépendances : world, origin, shape,
-simulation, bathymétrie, topographie, géologie, climat, tectonique, timeline, érosion...
+simulation, bathymétrie, topographie, climat, érosion, tectonique, géologie, timeline...
 
 ### 3.4 Listes
 

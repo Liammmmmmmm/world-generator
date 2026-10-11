@@ -4,3 +4,5 @@ output/
 .DS_Store
 compile_commands.json
 todo.md
+build-*/
+cache/

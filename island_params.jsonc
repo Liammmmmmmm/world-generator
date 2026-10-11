@@ -4,7 +4,7 @@
 // Fréquences de bruit : en cycles par rayon d'île R (R = shape.radius_ratio * demi-taille de la carte).
 // Coordonnées (x, y, center) : en mètres, origine au centre de la carte.
 {
-  "seed": 32,
+  "seed": 31,
 
   "world": {
     "width": 4096,
@@ -17,9 +17,12 @@
 
   "simulation": {
     "coarse_resolution": 1024,         // grille de l'étape 3
-    "total_duration_years": null,      // [1e5, 2e7]
+    "total_duration_years": null,      // [2e5, 2e6] : plus long pour une île grande (R de 500 m à 2 km) et vieille
     "dt_years": null,                  // [500, 1e4]
     "climate_update_interval_steps": 10,
+    // étape 3 : chaque processus de la boucle temporelle peut être désactivé
+    "processes": { "uplift": true, "climate": true, "glaciers": true, "fluvial": true, "hillslope": true, "marine": true },
+    "log_interval_steps": 100,         // la simulation logue ses chiffres tous les N pas
     "boundary_depth_m": null           // fond océanique imposé au bord [-1500, -200] ; limité pour que la pente du talus tienne dans la carte
   },
 
@@ -76,6 +79,13 @@
                                        // peneplain / noise / flat : 10 + 290 u² (basse le plus souvent), atoll : 0
     "noise": { "frequency": null, "amplitude_m": null, "octaves": null, "lacunarity": 2.0, "gain": 0.5 },
                                        // amplitude : peneplain [5, 40], barrier [0.3, 1.5], autres [10, 200]
+    // Pas de terrain plat au départ (un plat s'écoule en lignes droites parallèles) :
+    "regional_dome_m": null,           // bombement de la côte vers l'intérieur : volc. [5, 15], cont. [10, 30],
+                                       // séd. [5, 15], cor. [5, 10] ; pas appliqué aux modes atoll et barrier
+    "roughness_m": null,               // rugosité multi-échelles (fBm) : atoll et barrier [0.5, 1],
+                                       // sinon volc. [3, 8], cont. [4, 10], séd. [2, 6], cor. [2, 4]
+    "roughness_frequency": null,       // cycles par rayon d'île [4, 8]
+    "roughness_octaves": null,         // [4, 6]
     "volcano": {
       "count": null,                   // [1, 3]
       "radius_m": null,                // rayon maximal [0.6, 1] * R ; un volcan est réduit (avec sa hauteur et son cratère)
@@ -151,18 +161,35 @@
   },
 
   // Tectonique par origine : volcanique = 0 ou 1 dôme faible ; sédimentaire et corallienne = 0 ou 1 subsidence
-  // faible ; continentale = 1 à 4 phases, palette complète. Seuls les motifs spatiaux sont calculés à l'étape 2.
+  // faible (plafonnée : au plus 50 % de l'altitude moyenne initiale de l'île) ; continentale = 1 à 4 phases,
+  // collision 40 %, dome 30 %, tilt 10 %, block_uplift 10 %, horst_graben 10 %, jamais de subsidence (sauf forcée).
+  // Seuls les motifs spatiaux sont calculés à l'étape 2.
+  // Contrôle après tirage : si le soulèvement total moyen sur l'île est négatif (au-delà de la subsidence
+  // permise), la phase qui l'abaisse le plus est retirée (jamais une phase dont le type est forcé) ; c'est logué.
   "tectonics": {
     "phases": null,
     // [{ "type": "collision" | "dome" | "horst_graben" | "block_uplift" | "tilt" | "subsidence",
     //    "start_years": .., "end_years": .., "rate_m_per_year": .. (>= 0 ; le motif porte le signe),
-    //    "center": [x, y], "angle_deg": .., "length_m": .., "width_m": ..,
-    //    "falloff": .. (largeur des bords, fraction de la demi-taille ; étroite pour block_uplift et horst_graben),
-    //    "fault_dip_deg": .. (pendage des failles générées pour block_uplift et horst_graben [55, 80]) }]
-    // Les phases block_uplift et horst_graben génèrent des failles le long de leurs bords (visibles dans
-    // geology.derived_faults, toujours recalculées) : le côté soulevé est décalé dans le même sens que le relief.
+    //    "center": [x, y], "angle_deg": .., "length_m": .., "width_m": ..
+    //    (longueur et largeur au plus 1.2 fois le diamètre de l'île dans leur direction),
+    //    "falloff": .. (largeur des bords, fraction de la demi-taille : [0.2, 0.35] pour block_uplift et
+    //                   horst_graben, soit au moins 10 % de la largeur ; [0.2, 1] sinon),
+    //    "fault_dip_deg": .. (pendage des failles générées pour block_uplift et horst_graben [55, 80]),
+    //    "negative_factor": 0.3 (tilt et horst_graben : échelle de la partie abaissée du motif) }]
+    // Les phases block_uplift et horst_graben génèrent des failles le long de leurs bords : la géologie suit
+    // le contour déformé du motif ; geology.derived_faults (toujours recalculées) en donne les traces nominales.
     "phase_count": null,
-    "max_uplift_rate_m_per_year": null // [1e-5, 5e-3]
+    // Le relief d'équilibre des rivières vaut environ 10 m * (U / k_base) * P^-m (wgen --calibrate) : le taux
+    // max est déduit d'un relief cible, pour que soulèvement et érosion restent du même ordre.
+    "target_relief_m": null,           // cont. log [150, 1500], volc. 50-100 % de la hauteur du cône, séd. et cor. [5, 30]
+    "max_uplift_rate_m_per_year": null, // target_relief_m * max(k_base * P^m / 10, 1 / durée), borné à [1e-5, 1e-2]
+    "ongoing_uplift": null,            // cont. : 75 %, volc. : 1 - âge ; la dernière phase de soulèvement (collision, dome,
+                                       // block_uplift) commence dans le 1er cinquième et dure jusqu'à la fin ; sinon île « vieille »
+    // Tous les motifs sont déformés (pas de bord ni d'axe rectiligne) et modulés (jamais uniformes) :
+    "uplift_warp_amplitude": null,      // domain warp, relatif au rayon de l'île [0.1, 0.25]
+    "uplift_warp_frequency": null,      // cycles par rayon d'île [0.7, 1.5]
+    "uplift_modulation": null,          // motif * lerp(1 - modulation, 1, bruit) [0.3, 0.6]
+    "uplift_modulation_frequency": 2.0  // cycles par rayon d'île
   },
 
   "climate": {
@@ -172,7 +199,15 @@
     "base_precipitation_m_per_year": null,
     "wind": { "direction_deg": null, "strength": null, "variability_deg": null },
     "swell": { "direction_deg": null, "energy": null },
-    "orographic": { "condensation_rate": null, "rain_shadow_strength": null, "moisture_recharge_over_sea": null }
+    // Précipitations orographiques (advection de l'humidité le long du vent) ; les taux sont par km parcouru,
+    // par km de montée ou par km de mer, donc indépendants de la grille.
+    "orographic": {
+      "condensation_rate": null,         // part de l'humidité qui tombe par km de montée [0.2, 1]
+      "rain_shadow_strength": null,      // réservé : l'ombre pluviométrique vient de l'épuisement de l'humidité
+      "moisture_recharge_over_sea": null, // relaxation de l'humidité vers la saturation, par km de mer [0.05, 0.5]
+      "q0": 1.0,                         // échelle de saturation : q_sat = q0 * exp(0.07 * T)
+      "base_rate": null                  // part de l'humidité qui tombe par km parcouru, sans relief [0.02, 0.1]
+    }
   },
 
   "timeline": {
@@ -187,24 +222,58 @@
       "m": 0.45,
       "n": 1.0,
       "deposition_g": null,            // coefficient de dépôt (Yuan 2019) [0, 2]
-      "precipitation_weighted": true
+      "precipitation_weighted": true,
+      "k_sediment_mult": 5,              // K sur les sédiments = k_base * k_sediment_mult ; sur la roche : k_base * erodibility
+      "deposition_tolerance": 1e-3,      // Gauss-Seidel sur le flux de sédiments : variation relative (L1) où s'arrêter
+      "deposition_max_iterations": 20
     },
-    "hillslope": { "diffusivity_m2_per_year": null },
-    "thermal": { "iterations_per_step": 1, "rate": null },
+    // Diffusion marine des sédiments (Yuan et al. 2019, EPSL) : D(z) = d0 * exp(-profondeur / depth_scale_m),
+    // en m²/an, par classe de grains : gravier et sable (sand_d0), argile (fines_d0, plus mobile).
+    // Valeurs ramenées à l'échelle de ces cartes (quelques km) : D varie comme le carré des longueurs.
+    "marine_diffusion": {
+      "sand_d0": null,                   // log [0.05, 1]
+      "fines_d0": null,                  // sand_d0 * [5, 20]
+      "depth_scale_m": null,             // [15, 60]
+      "mobile_layer_m": 1                // flux sortant * min(1, sédiment / mobile_layer_m) : une pellicule ne file pas
+    },
+    "hillslope": { "diffusivity_m2_per_year": null },  // [1e-3, 1e-1], diffusion implicite (ADI) sur la terre
+    "thermal": {
+      "iterations_per_step": 1,
+      "rate": null,                      // part de l'excès de hauteur déplacée par passe (défaut 0.5 : la moitié)
+      "sediment_talus_angle_deg": 33     // angle de repos des sédiments ; la roche utilise talus_angle_deg de son matériau
+    },
+    // Glaciers : écoulement SIA (Jarosch et al. 2013) sur une grille grossière, relaxé à l'équilibre à chaque mise à
+    // jour du climat ; érosion de Harbor (1992) à chaque pas ; moraines au front.
     "glacial": {
-      "accumulation_rate": null,
-      "ablation_gradient": null,
-      "deformation_coeff": null,       // SIA
-      "sliding_coeff": null,
-      "erosion_coeff": null,
-      "erosion_exponent": 1.0
+      "accumulation_rate": null,       // part des chutes de neige qui devient glace [0.5, 1.5]
+      "ablation_gradient": null,       // m de glace fondue par an et par °C au-dessus de 0 [0.3, 1.5]
+      "sliding_coeff": null,           // u_s = sliding_coeff * tau_b² (m/an/Pa²) log [5e-10, 1e-8]
+      "erosion_coeff": null,           // érosion = erosion_coeff * u_s^erosion_exponent log [5e-6, 5e-5] (~1 mm/an à 50 m/an)
+      "erosion_exponent": 1.0,
+      "glen_A": 2.4e-24,               // facteur de la loi de Glen (Pa⁻³ s⁻¹), converti en années dans le code
+      "ice_density": 917,              // kg/m³
+      "snow_temperature_c": 0,         // il neige en dessous
+      "max_substeps": 5000,            // sous-pas au plus par relaxation de la glace
+      "convergence_tol": 0.01,         // relaxée quand |dH/dt| moyen < tol (m/an)
+      "ice_threshold_m": 5,            // plus épaisse : pas de rivières ni de versants ; plus mince : les moraines tombent
+      "calving_depth_m": 30,           // la glace vêle sur une eau plus profonde
+      "ice_grid_cell_m": 50            // maille de la grille de la glace (le SIA explicite est impossible à 4 m)
+    },
+    // Croissance récifale (îles coralliennes) : le récif suit le niveau marin (Darwin).
+    "reef": {
+      "enabled": true,
+      "growth_rate": null,             // m/an log [2e-3, 1e-2]
+      "max_depth": null                // croît entre cette profondeur et la surface [10, 30]
     },
     "coastal": {
-      "wave_erosion_coeff": null,
+      "wave_erosion_coeff": null,        // m² de section de falaise par an et par m de côte (expo., énergie et dureté 1) log [0.01, 1]
       "fetch_ray_count": 32,
-      "fetch_max_distance_m": null,
-      "platform_depth_m": null,
-      "sediment_export_threshold": null // énergie au-dessus de laquelle les débris partent au large
+      "fetch_max_distance_m": null,      // [2000, 20000]
+      "platform_depth_m": null,          // plateforme d'abrasion sous le niveau marin [3, 15]
+      "sediment_export_threshold": null, // énergie * exposition au-dessus de laquelle les débris partent au large [0.3, 0.9]
+      "exposure_update_interval_steps": 10, // l'exposition (rayons de fetch) est recalculée tous les N pas
+      "platform_attenuation_m": 200,     // la houle s'amortit en exp(-largeur des petits fonds / ceci) : le recul ralentit
+      "sediment_hardness": 0.1           // dureté d'une couverture de sédiments face aux vagues
     },
     "detail_hydraulic": {
       "method": "droplet",             // "droplet" | "pipe"
@@ -228,6 +297,16 @@
       "repose_angle_deg": 34,
       "shadow_angle_deg": 15
     }
+  },
+
+  // Multiplicateurs des coefficients de chaque processus, par origine (l'île utilise ceux de son origine).
+  // fluvial : k_base ; hillslope : diffusivité ; thermal : taux d'effondrement ; marine : érosion par les vagues ;
+  // marine_diffusion : diffusivités marines ; glacial : érosion glaciaire.
+  "process_multipliers": {
+    "volcanic":    { "fluvial": 1.0,  "hillslope": 1, "thermal": 1, "marine": 1.0, "marine_diffusion": 1, "glacial": 1 },
+    "continental": { "fluvial": 1.0,  "hillslope": 1, "thermal": 1, "marine": 1.0, "marine_diffusion": 1, "glacial": 1 },
+    "sedimentary": { "fluvial": 0.5,  "hillslope": 0.2, "thermal": 1, "marine": 1.5, "marine_diffusion": 2, "glacial": 1 },
+    "coral":       { "fluvial": 0.05, "hillslope": 0.2, "thermal": 1, "marine": 1.0, "marine_diffusion": 1, "glacial": 1 }
   },
 
   "hydrology": {

@@ -1,0 +1,19 @@
+// Validation de l'étape 3, partie 1 : une île ronde soulevée par un dôme constant,
+// érodée par les rivières (K constant). Attendu : un réseau dendritique (couche
+// "discharge") et un relief qui se stabilise (mean |dh/dt| -> 0 dans les logs).
+// Le relief initial a quelques mètres de rugosité : sur une surface parfaitement
+// lisse, le routage D8 donne des rivières parallèles dans les 8 directions de la
+// grille, sans rien pour amorcer les captures (essayer "mode": "flat" pour le voir).
+{
+  "seed": 5,
+  "origin": { "type": "continental" },
+  "shape": { "lobe_count": 1, "lobe_spread": 0, "radius_ratio": 0.6, "elongation": 1.0, "bay_count": 0 },
+  "initial_topography": { "mode": "peneplain", "base_elevation_m": 10,
+                          "noise": { "frequency": 20, "amplitude_m": 5, "octaves": 5 } },
+  "geology": { "folding": { "enabled": false }, "fault_count": 0, "intrusion_count": 0 },
+  "tectonics": { "phases": [ { "type": "dome", "center": [0, 0], "width_m": 700,
+                               "rate_m_per_year": 5e-4, "start_years": -1e7, "end_years": 1e8 } ] },
+  "climate": { "base_precipitation_m_per_year": 1.0 },
+  "erosion": { "fluvial": { "k_base": 2e-5, "m": 0.5 } },
+  "simulation": { "total_duration_years": 3e6, "dt_years": 10000, "log_interval_steps": 25 }
+}

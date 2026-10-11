@@ -16,6 +16,13 @@
 #include "wg/island/IslandGrid.hpp"
 #include "wg/island/IslandLayers.hpp"
 #include "wg/render/MapRenderer.hpp"
+#include "wg/sim/Climate.hpp"
+#include "wg/sim/Coastal.hpp"
+#include "wg/sim/Fluvial.hpp"
+#include "wg/sim/Glacier.hpp"
+#include "wg/sim/Hillslope.hpp"
+#include "wg/sim/Marine.hpp"
+#include "wg/sim/Routing.hpp"
 #include "wg/params/IslandParams.hpp"
 
 namespace {
@@ -75,6 +82,28 @@ private:
     float amount_;
 };
 
+// Digs a round pit into "h" (and keeps the island flags), for the lake test.
+class DigStage final : public wg::Stage {
+public:
+    explicit DigStage(wg::StageParams& params)
+        : x_(params.get("x", 0.0)), y_(params.get("y", 0.0)), radius_(params.get("radius_m", 100.0)),
+          depth_(params.get("depth_m", 30.0)) {}
+
+    void run(wg::WorldState& world, const wg::StageContext&) override {
+        const wg::IslandGrid grid(world.params().values);
+        auto& h = world.editLayer("h");
+        for (int j = 0; j < grid.ny; ++j)
+            for (int i = 0; i < grid.nx; ++i) {
+                const double d = std::hypot(grid.x(i) - x_, grid.y(j) - y_);
+                if (d < radius_)
+                    h.at(i, j) -= static_cast<float>(depth_ * (1.0 - d / radius_));
+            }
+    }
+
+private:
+    double x_, y_, radius_, depth_;
+};
+
 // Builds a voxel volume with a column of stone up to y = 10.
 class StoneStage final : public wg::Stage {
 public:
@@ -89,7 +118,8 @@ const wg::StageRegistry& testRegistry() {
     static const wg::StageRegistry registry = [] {
         wg::StageRegistry r;
         r.add<FillStage>("flat");
-        for (const std::string type : {"parameters", "island_init"})
+        r.add<DigStage>("dig");
+        for (const std::string type : {"parameters", "island_init", "simulation"})
             r.add(type, [type](wg::StageParams& p) { return wg::StageRegistry::builtin().create(type, p); });
         r.add<AddStage>("add");
         r.add<StoneStage>("stone");
@@ -296,9 +326,12 @@ void testLiveCallbacks() {
 
 // --- Island initialization ---------------------------------------------------------
 
+// Steps 1 and 2 only (the simulation has its own tests).
 std::vector<wg::Snapshot> runIsland(nlohmann::json config) {
+    if (!config.contains("pipeline"))
+        config["pipeline"] = nlohmann::json::array({{{"type", "parameters"}}, {{"type", "island_init"}}});
     const auto loaded = wg::WorldConfig::fromJson(config);
-    return wg::Pipeline::fromConfig(loaded).run(loaded); // default pipeline
+    return wg::Pipeline::fromConfig(loaded).run(loaded);
 }
 
 void testIslandInit() {
@@ -512,7 +545,8 @@ void testTopographyByOrigin() {
                 lagoonMax = std::max(lagoonMax, h.data()[k]);
             }
         }
-        CHECK(landMax <= a.ringHeightM + a.ringNoiseM + 0.01);
+        const double roughness = coral.params().values.initialTopography.roughnessM; // + the smooth floor's 0.25 m
+        CHECK(landMax <= a.ringHeightM + a.ringNoiseM + roughness + 0.26);
         // (lagoon cells touching the ring are the shore: sea level + the 1 mm jitter)
         CHECK(lagoonMin >= -(a.lagoonDepthM + a.lagoonNoiseM) - 0.01 && lagoonMax < 1e-3f);
 
@@ -521,7 +555,7 @@ void testTopographyByOrigin() {
         const auto& t = barrier.params().values.initialTopography;
         const auto [bMin, bMax] = wg::valueRange(barrier.layer(wg::layers::kHeight));
         CHECK(t.mode == "barrier" && bMax > 0.0f);
-        CHECK(bMax <= t.baseElevationM + t.barrier.crestHeightM + t.noise.amplitudeM + 0.01);
+        CHECK(bMax <= t.baseElevationM + t.barrier.crestHeightM + t.noise.amplitudeM + t.roughnessM + 0.26);
     }
 }
 
@@ -534,13 +568,15 @@ void testUpliftPatterns() {
         p["type"] = type;
         phases.push_back(p);
     }
+    phases[1]["negative_factor"] = 1.0; // grabens as deep as the horsts are high (default 0.3, see the tilt)
     // A big round flat island so that the mask is 1 around the center.
     const auto state = runIsland({{"seed", 2},
                                   {"world", {{"width", 1024}, {"length", 1024}}},
                                   {"simulation", {{"coarse_resolution", 256}}},
                                   {"origin", {{"type", "volcanic"}}},
                                   {"shape", {{"lobe_count", 1}, {"lobe_spread", 0.0}, {"radius_ratio", 0.8}}},
-                                  {"tectonics", {{"phases", phases}}}})[1]
+                                  // exact shapes: no warp, no modulation
+                                  {"tectonics", {{"phases", phases}, {"uplift_warp_amplitude", 0}, {"uplift_modulation", 0}}}})[1]
                            .state;
     const wg::IslandGrid grid(state.params().values);
     // Pattern value at (x, y) meters from the center (axis = x).
@@ -551,7 +587,8 @@ void testUpliftPatterns() {
     };
     CHECK(at(0, 0, 0) > 0.95f && at(0, 0, 80) < 0.05f && at(0, 200, 0) < 0.05f); // block
     CHECK(at(1, 0, 50) > 0.95f && at(1, 0, 150) < -0.95f && at(1, 0, -50) < -0.95f); // horst / graben
-    CHECK(at(2, 0, 50) > 0.45f && at(2, 0, 50) < 0.55f && at(2, 0, -200) < -0.95f); // tilt
+    CHECK(at(2, 0, 50) > 0.45f && at(2, 0, 50) < 0.55f);                           // tilt
+    CHECK(at(2, 0, -200) < -0.25f && at(2, 0, -200) > -0.35f);                     // its lowered side, x 0.3
     CHECK(at(3, 0, 0) < -0.95f);                                                   // subsidence
 
     // Derived faults: wherever a fault borders a non-zero pattern, its positive
@@ -584,6 +621,53 @@ void testTectonicsByOrigin() {
                 CHECK(phase.type == (std::string(origin) == "volcanic" ? "dome" : "subsidence"));
         }
     }
+}
+
+// A drawn phase that sinks the island is dropped, and the resolved config
+// still reproduces the parameters exactly.
+void testSinkingPhaseDropped() {
+    const nlohmann::json config = {{"seed", 114}, {"origin", {{"type", "continental"}}}};
+    const auto original = wg::resolveIslandParams(114, config);
+    CHECK(original.notes.size() == 1);
+    CHECK(original.values.tectonics.phases.size() ==
+          static_cast<std::size_t>(original.toJson()["tectonics"]["phase_count"].get<int>()));
+    const auto replayed = wg::resolveIslandParams(114, nlohmann::json::parse(original.toJson().dump()));
+    CHECK(replayed.notes.empty()); // nothing left to drop
+    // (same values; the key order may differ: it follows the resolution order)
+    CHECK(nlohmann::json(replayed.toJson()) == nlohmann::json(original.toJson()));
+    // Forced types are never dropped.
+    nlohmann::json forced = config;
+    forced["tectonics"]["phases"] = nlohmann::json::array();
+    for (const auto& phase : original.toJson()["tectonics"]["phases"])
+        forced["tectonics"]["phases"].push_back({{"type", phase["type"]}});
+    forced["tectonics"]["phases"].push_back({{"type", "subsidence"}, {"rate_m_per_year", 5e-3}});
+    CHECK(wg::resolveIslandParams(114, forced).values.tectonics.phases.size() == forced["tectonics"]["phases"].size());
+}
+
+// Durations and uplift (step 3, part 1 fixes): uplift and erosion of the same order.
+void testDurationsAndUplift() {
+    int ongoing = 0;
+    const int seeds = 200;
+    for (int seed = 1; seed <= seeds; ++seed) {
+        const auto p = wg::WorldConfig::fromJson({{"seed", seed}, {"origin", {{"type", "continental"}}}}).island();
+        const double duration = p.simulation.totalDurationYears;
+        CHECK(duration >= 2e5 && duration <= 2e6);
+        const auto& t = p.tectonics;
+        const double expected = t.targetReliefM * std::max(p.erosion.fluvial.kBase *
+                                                               std::pow(p.climate.basePrecipitationMPerYear, p.erosion.fluvial.m) / 10.0,
+                                                           1.0 / duration);
+        CHECK(std::abs(t.maxUpliftRateMPerYear - std::clamp(expected, 1e-5, 1e-2)) < 1e-9 * expected);
+        if (!t.ongoingUplift)
+            continue;
+        ++ongoing;
+        int last = -1;
+        for (std::size_t k = 0; k < t.phases.size(); ++k)
+            if (t.phases[k].type == "collision" || t.phases[k].type == "dome" || t.phases[k].type == "block_uplift")
+                last = static_cast<int>(k);
+        if (last >= 0)
+            CHECK(t.phases[last].endYears == duration && t.phases[last].startYears <= 0.2 * duration);
+    }
+    CHECK(ongoing > 0.65 * seeds && ongoing < 0.85 * seeds); // ~75 %
 }
 
 void testSharedAxis() {
@@ -681,7 +765,8 @@ void testDerivedFaultsFollowTheirPhase() {
     const auto params = wg::WorldConfig::fromJson(
                             {{"seed", 1},
                              {"geology", {{"fault_count", 0}}},
-                             {"tectonics", {{"phases", J::array({{{"type", "block_uplift"}, {"center", {0, 0}},
+                             {"tectonics", {{"uplift_warp_amplitude", 0}, {"uplift_modulation", 0},
+                                            {"phases", J::array({{{"type", "block_uplift"}, {"center", {0, 0}},
                                                                    {"angle_deg", 0}, {"length_m", 600}, {"width_m", 300},
                                                                    {"rate_m_per_year", 1e-4}, {"start_years", 0},
                                                                    {"end_years", 100000}}})}}}})
@@ -693,15 +778,16 @@ void testDerivedFaultsFollowTheirPhase() {
     geology.setPhaseProgress({1.0});
     CHECK(std::abs(geology.faultOffset(0, 0, 0) - 10.0) < 1e-9);
     CHECK(geology.faultOffset(0, 400, 0) == 0.0); // outside the block
-    CHECK(geology.faultOffset(0, 160, 0) == 0.0); // just outside at sea level...
+    // The wall is in the middle of the soft edge, at least 15 m inside the outline (150 m).
+    CHECK(geology.faultOffset(0, 140, 0) == 0.0); // just outside at sea level...
     const double dip = params.tectonics.phases[0].faultDipDeg * std::numbers::pi / 180.0;
-    CHECK(geology.faultOffset(0, 160, -20.0 * std::tan(dip)) == 10.0); // ...inside 20 m deeper: the walls dip outwards
+    CHECK(geology.faultOffset(0, 140, -40.0 * std::tan(dip)) == 10.0); // ...inside 40 m deeper: the walls dip outwards
 
-    // Horst / graben: bands across the axis, raised and lowered by U.
+    // Horst / graben: bands across the axis, raised by U, lowered by 0.3 U.
     const auto bands = wg::WorldConfig::fromJson(
                            {{"seed", 1},
                             {"geology", {{"fault_count", 0}}},
-                            {"tectonics", {{"phases", J::array({{{"type", "horst_graben"}, {"center", {0, 0}},
+                            {"tectonics", {{"uplift_warp_amplitude", 0}, {"uplift_modulation", 0}, {"phases", J::array({{{"type", "horst_graben"}, {"center", {0, 0}},
                                                                   {"angle_deg", 0}, {"length_m", 2000}, {"width_m", 200},
                                                                   {"rate_m_per_year", 1e-4}, {"start_years", 0},
                                                                   {"end_years", 100000}}})}}}})
@@ -709,8 +795,566 @@ void testDerivedFaultsFollowTheirPhase() {
     wg::Geology horsts(bands);
     horsts.setPhaseProgress({1.0});
     CHECK(horsts.faultOffset(0, 100, 0) == 10.0);  // band 0: horst
-    CHECK(horsts.faultOffset(0, 300, 0) == -10.0); // band 1: graben
-    CHECK(horsts.faultOffset(0, -100, 0) == -10.0);
+    CHECK(std::abs(horsts.faultOffset(0, 300, 0) + 3.0) < 1e-9); // band 1: graben
+    CHECK(std::abs(horsts.faultOffset(0, -100, 0) + 3.0) < 1e-9);
+}
+
+// --- Simulation (step 3) ---------------------------------------------------------------
+
+// A round flat island lifted by one constant dome, eroded by rivers.
+nlohmann::json simulationConfig(double kBase, double dt = 1e4, double duration = 2e6) {
+    using J = nlohmann::json;
+    return {{"seed", 5},
+            {"world", {{"width", 2048}, {"length", 2048}}},
+            {"origin", {{"type", "continental"}}},
+            {"shape", {{"lobe_count", 1}, {"lobe_spread", 0.0}, {"radius_ratio", 0.6}, {"elongation", 1.0}}},
+            {"initial_topography", {{"mode", "flat"}, {"base_elevation_m", 10}}},
+            {"tectonics", {{"phases", J::array({{{"type", "dome"}, {"center", {0, 0}}, {"width_m", 400},
+                                                  {"rate_m_per_year", 5e-4}, {"start_years", -1e7},
+                                                  {"end_years", 1e8}}})}}},
+            {"climate", {{"base_precipitation_m_per_year", 1.0}}},
+            // rivers only: no climate (uniform rain), no wave erosion
+            {"erosion", {{"fluvial", {{"k_base", kBase}, {"m", 0.5}}}, {"coastal", {{"wave_erosion_coeff", 0.0}}}}},
+            {"simulation",
+             {{"coarse_resolution", 128}, {"total_duration_years", duration}, {"dt_years", dt},
+              {"log_interval_steps", 10}, {"processes", {{"climate", false}}}}},
+            {"pipeline", J::array({{{"type", "parameters"}}, {{"type", "island_init"}}, {{"type", "simulation"}}})}};
+}
+
+struct SimulationRun {
+    wg::WorldState state;
+    std::vector<double> meanRates; // mean |dh/dt| of each log line
+};
+
+SimulationRun simulate(const nlohmann::json& config, const wg::StageRegistry& registry = testRegistry()) {
+    const auto loaded = wg::WorldConfig::fromJson(config);
+    SimulationRun run;
+    wg::PipelineCallbacks callbacks;
+    callbacks.onLog = [&](std::size_t, const std::string& line) {
+        const auto at = line.find("mean |dh/dt| ");
+        if (at != std::string::npos)
+            run.meanRates.push_back(std::stod(line.substr(at + 13)));
+    };
+    run.state = wg::Pipeline::fromConfig(loaded, registry).run(loaded, callbacks).back().state;
+    return run;
+}
+
+void testSimulationSteadyState() {
+    const auto run = simulate(simulationConfig(2e-5));
+    const auto& h = run.state.layer(wg::layers::kHeight);
+    const auto& q = run.state.layer(wg::layers::kDischarge);
+    CHECK(std::all_of(h.data().begin(), h.data().end(), [](float v) { return std::isfinite(v); }));
+    // Relief built by the dome, then held by erosion: |dh/dt| decays towards 0.
+    CHECK(run.meanRates.size() >= 10);
+    CHECK(run.meanRates.back() < 0.2 * run.meanRates.front());
+    // A river network: discharge concentrates far beyond a single cell's.
+    const double cell = 1.0 * 16.0 * 16.0;
+    CHECK(wg::valueRange(q).max > 200.0 * cell);
+    CHECK(run.state.scalar("time_years") == 2e6 && run.state.scalar("steps") == 200);
+
+    // Calibration: twice the erodibility, lower equilibrium relief.
+    const auto softer = simulate(simulationConfig(4e-5));
+    CHECK(wg::valueRange(softer.state.layer(wg::layers::kHeight)).max < 0.8f * wg::valueRange(h).max);
+
+    // Deterministic.
+    const auto again = simulate(simulationConfig(2e-5));
+    const auto a = h.data(), b = again.state.layer(wg::layers::kHeight).data();
+    CHECK(std::equal(a.begin(), a.end(), b.begin(), b.end()));
+
+    // FIXED cells untouched.
+    const auto& flags = run.state.byteLayer(wg::layers::kFlags);
+    const float boundary = static_cast<float>(run.state.params().values.simulation.boundaryDepthM);
+    for (std::size_t k = 0; k < h.size(); ++k)
+        if (flags.data()[k] & wg::layers::kFixed)
+            CHECK(h.data()[k] == boundary);
+}
+
+void testSimulationLake() {
+    // A pit dug in the island becomes a lake that the drainage crosses.
+    auto config = simulationConfig(2e-5, 1e4, 1e4);
+    config["pipeline"] = nlohmann::json::array({{{"type", "parameters"}}, {{"type", "island_init"}},
+                                                {{"type", "dig"}, {"x", 100}, {"y", 0}, {"radius_m", 200}},
+                                                {{"type", "simulation"}}});
+    const auto run = simulate(config);
+    const wg::IslandGrid grid(run.state.params().values);
+    const int i = static_cast<int>(100.0 / grid.cellM + grid.nx / 2), j = grid.ny / 2;
+    const auto& lake = run.state.layer(wg::layers::kLakeDepth);
+    const auto& q = run.state.layer(wg::layers::kDischarge);
+    CHECK(lake.at(i, j) > 10.0f);
+    // The water crosses the lake: all its cells drain to the spill point, so the
+    // lake cell next to it carries at least the rain fallen on the whole lake.
+    int lakeCells = 0;
+    float maxQ = 0.0f;
+    for (std::size_t k = 0; k < lake.size(); ++k) {
+        if (lake.data()[k] > 0.01f) {
+            ++lakeCells;
+            maxQ = std::max(maxQ, q.data()[k]);
+        }
+    }
+    const double cellRain = 1.0 * grid.cellM * grid.cellM;
+    CHECK(lakeCells > 100 && maxQ >= 0.999 * lakeCells * cellRain);
+    // Only the pit is a lake: the epsilon slope across the flat plateau around
+    // it (centimetres over hundreds of cells) is not water.
+    const double pitCells = 3.14159 * 200.0 * 200.0 / (grid.cellM * grid.cellM);
+    CHECK(lakeCells < 1.5 * pitCells);
+}
+
+// --- Hillslopes (step 3, part 2) ------------------------------------------------------
+
+void testRegolith() {
+    std::vector<double> b{100.0}, sed{0.0};
+    std::vector<wg::Composition> frac(1);
+    const std::vector<int> kind{wg::kClay};
+    const wg::Regolith regolith{b, sed, frac, kind};
+    regolith.deposit(0, {2.0, 0.0, 0.0}); // 2 m of gravel
+    regolith.deposit(0, {0.0, 2.0, 0.0}); // + 2 m of sand: half and half
+    CHECK(sed[0] == 4.0 && frac[0][wg::kGravel] == 0.5 && frac[0][wg::kSand] == 0.5);
+    // Removal takes the sediment first (with its composition), then the rock.
+    const auto removed = regolith.remove(0, 5.0);
+    CHECK(sed[0] == 0.0 && b[0] == 99.0);
+    CHECK(removed[wg::kGravel] == 2.0 && removed[wg::kSand] == 2.0 && removed[wg::kClay] == 1.0);
+}
+
+void testHillslopeDiffusion() {
+    const int nx = 64, ny = 48, n = nx * ny;
+    std::vector<double> h(n);
+    std::vector<std::uint8_t> active(n);
+    for (int c = 0; c < n; ++c) {
+        const int i = c % nx, j = c / nx;
+        active[c] = std::hypot(i - 30, j - 24) < 20; // an island; the rest keeps its height
+        h[c] = active[c] ? 10.0 + 5.0 * ((i * 7 + j * 13) % 5) : -50.0;
+    }
+    const auto sum = [&](const std::vector<double>& v) {
+        double total = 0.0;
+        for (int c = 0; c < n; ++c)
+            total += active[c] ? v[c] : 0.0;
+        return total;
+    };
+    const std::vector<double> before = h;
+    const int substeps = wg::diffuseADI(h, active, nx, ny, 7.5);
+    CHECK(substeps == 8); // r = 7.5: sub-steps of r <= 1
+    CHECK(std::abs(sum(h) - sum(before)) < 1e-9 * sum(before)); // no flux out of the island
+    double lo = 1e9, hi = -1e9, variance = 0.0, varianceBefore = 0.0;
+    const double mean = sum(h) / std::count(active.begin(), active.end(), 1);
+    for (int c = 0; c < n; ++c) {
+        if (!active[c]) {
+            CHECK(h[c] == -50.0);
+            continue;
+        }
+        lo = std::min(lo, h[c]);
+        hi = std::max(hi, h[c]);
+        variance += (h[c] - mean) * (h[c] - mean);
+        varianceBefore += (before[c] - mean) * (before[c] - mean);
+    }
+    CHECK(lo >= 10.0 - 1e-9 && hi <= 30.0 + 1e-9); // no new extrema
+    CHECK(variance < 0.01 * varianceBefore);      // the grid-scale noise is gone
+}
+
+void testThermalCollapse() {
+    // A 100 m rock cliff (45 degrees repose) collapses into scree at its foot.
+    const int nx = 64, ny = 8, n = nx * ny;
+    const double dx = 4.0;
+    std::vector<double> b(n), sed(n, 0.0), h(n), rockTan(n, 1.0);
+    std::vector<wg::Composition> frac(n);
+    const std::vector<int> kind(n, wg::kSand);
+    const std::vector<std::uint8_t> source(n, 1), fixed(n, 0);
+    for (int c = 0; c < n; ++c)
+        h[c] = b[c] = (c % nx) < 32 ? 150.0 : 50.0;
+    const wg::Regolith regolith{b, sed, frac, kind};
+    const double tan33 = std::tan(33.0 * std::numbers::pi / 180.0);
+    double volume = 0.0;
+    for (double v : h)
+        volume += v;
+    for (int pass = 0; pass < 400; ++pass)
+        wg::thermalCollapse(regolith, h, source, fixed, rockTan, tan33, 0.5, nx, ny, dx);
+    double after = 0.0, worstRock = 0.0, worstScree = 0.0;
+    for (double v : h)
+        after += v;
+    CHECK(std::abs(after - volume) < 1e-9 * volume);
+    for (int j = 0; j < ny; ++j) {
+        for (int i = 0; i + 1 < nx; ++i) {
+            const int c = j * nx + i;
+            const double slope = std::abs(h[c] - h[c + 1]) / dx;
+            if (sed[c] < 1e-6 && sed[c + 1] < 1e-6)
+                worstRock = std::max(worstRock, slope);
+            else if (sed[c] > 1.0 && sed[c + 1] > 1.0)
+                worstScree = std::max(worstScree, slope / tan33);
+        }
+    }
+    CHECK(worstRock < 1.1);   // rock: at most ~45 degrees
+    CHECK(worstScree < 1.15); // scree: at most ~33 degrees
+    CHECK(sed[4 * nx + 34] > 1.0 && sed[4 * nx + 10] == 0.0); // scree below the cliff, none on the plateau
+    CHECK(frac[4 * nx + 34][wg::kSand] == 1.0);
+}
+
+void testSimulationSediment() {
+    auto config = simulationConfig(2e-5, 1e4, 5e5);
+    config["erosion"]["hillslope"] = {{"diffusivity_m2_per_year", 0.02}};
+    config["erosion"]["thermal"] = {{"iterations_per_step", 2}};
+    std::vector<double> volumeErrors, budgetDrifts;
+    const auto loaded = wg::WorldConfig::fromJson(config);
+    wg::PipelineCallbacks callbacks;
+    callbacks.onLog = [&](std::size_t, const std::string& line) {
+        const auto at = line.find("hillslope dV/V ");
+        if (at != std::string::npos)
+            volumeErrors.push_back(std::stod(line.substr(at + 15)));
+        const auto drift = line.find("drift ");
+        if (drift != std::string::npos)
+            budgetDrifts.push_back(std::abs(std::stod(line.substr(drift + 6))));
+    };
+    const auto state = wg::Pipeline::fromConfig(loaded, testRegistry()).run(loaded, callbacks).back().state;
+    CHECK(!volumeErrors.empty());
+    for (double e : volumeErrors)
+        CHECK(e < 1e-10);
+    CHECK(!budgetDrifts.empty());
+    for (double e : budgetDrifts)
+        CHECK(e < 1e-9); // rock eroded = stored + exported
+    const auto& sed = state.layer(wg::layers::kSediment);
+    const auto& gravel = state.layer(wg::layers::kSedimentGravel);
+    const auto& sand = state.layer(wg::layers::kSedimentSand);
+    const auto& clay = state.layer(wg::layers::kSedimentClay);
+    const auto& dominant = state.layer(wg::layers::kSedimentDominant);
+    int covered = 0;
+    for (std::size_t k = 0; k < sed.size(); ++k) {
+        CHECK(sed.data()[k] >= 0.0f);
+        if (sed.data()[k] > 0.01f) {
+            ++covered;
+            CHECK(std::abs(gravel.data()[k] + sand.data()[k] + clay.data()[k] - 1.0f) < 1e-4f);
+            CHECK(dominant.data()[k] >= 1.0f);
+        }
+    }
+    CHECK(covered > 10); // scree and colluvium somewhere
+    const auto& material = state.layer(wg::layers::kSurfaceMaterial);
+    const auto categories = state.layerMeta(wg::layers::kSurfaceMaterial).categories.size();
+    for (float id : material.data())
+        CHECK(id >= 0.0f && id < static_cast<float>(categories));
+}
+
+// --- Sediment transport (step 3, part 3) ---------------------------------------------
+
+// A cone of rock in the sea, routed once.
+struct ConeWorld {
+    int nx = 48, ny = 40, n = 48 * 40;
+    double dx = 10.0;
+    std::vector<double> h, b, sed;
+    std::vector<wg::Composition> frac;
+    std::vector<int> kind;
+    std::vector<std::uint8_t> fixed;
+    ConeWorld() : h(n), b(n), sed(n, 0.0), frac(n), kind(n, wg::kSand), fixed(n, 0) {
+        for (int c = 0; c < n; ++c) {
+            const int i = c % nx, j = c / nx;
+            const double r = std::hypot(i - 24.0, j - 20.0);
+            b[c] = 60.0 - 4.0 * r + 0.3 * ((i * 7 + j * 13) % 5); // roughness for a network
+            fixed[c] = i == 0 || j == 0 || i == nx - 1 || j == ny - 1;
+            if (fixed[c])
+                b[c] = -40.0;
+            h[c] = b[c];
+        }
+    }
+};
+
+void testFluvialRegression() {
+    // G = 0: exactly the erosion-only implicit scheme of part 1 (uniform rock).
+    ConeWorld w;
+    wg::FlowRouter router(w.nx, w.ny, w.dx);
+    router.route(w.h, w.fixed, 0.0);
+    std::vector<double> q, area;
+    router.accumulate(std::vector<double>(w.n, 1.0 * w.dx * w.dx), q);
+    router.accumulate(std::vector<double>(w.n, w.dx * w.dx), area);
+    const double k = 2e-5, dt = 1e4;
+    std::vector<double> expected = w.h;
+    for (const int c : router.stack()) {
+        const int r = router.receivers()[c];
+        if (r == c || w.fixed[c] || router.ocean()[c])
+            continue;
+        const double base = router.ocean()[r] ? std::max(expected[r], 0.0) : expected[r];
+        if (expected[c] <= base)
+            continue;
+        const double f = k * std::sqrt(q[c]) * dt / router.receiverDistance()[c];
+        expected[c] = (expected[c] + f * base) / (1.0 + f);
+    }
+    const wg::Regolith regolith{w.b, w.sed, w.frac, w.kind};
+    wg::FluvialSettings settings;
+    settings.kSediment = 5 * k;
+    settings.m = 0.5;
+    settings.g = 0.0;
+    settings.dt = dt;
+    settings.cellM = w.dx;
+    std::vector<double> qs(w.n), erosion(w.n), deposition(w.n);
+    const auto result = wg::fluvialStep(router, settings, regolith, q, area, std::vector<double>(w.n, k), w.fixed, w.h,
+                                        qs, erosion, deposition);
+    CHECK(result.iterations == 1);
+    double worst = 0.0, deposited = 0.0;
+    for (int c = 0; c < w.n; ++c) {
+        if (!router.ocean()[c] && !w.fixed[c]) {
+            worst = std::max(worst, std::abs(w.h[c] - expected[c]));
+        }
+        deposited += w.sed[c];
+    }
+    CHECK(worst < 1e-9); // land: identical to part 1
+    // Nothing is lost: what the rock lost is at sea or exported.
+    double rockLost = 0.0;
+    const ConeWorld initial;
+    for (int c = 0; c < w.n; ++c)
+        if (!w.fixed[c])
+            rockLost += initial.b[c] - w.b[c];
+    CHECK(std::abs(rockLost * w.dx * w.dx - deposited * w.dx * w.dx - result.exported) < 1e-6 * rockLost * w.dx * w.dx);
+    CHECK(result.toSea > 0.0);
+}
+
+void testFluvialDeposition() {
+    // G > 0: the flux settles on the way (G Qs / A), the higher G the more.
+    double previous = -1.0;
+    for (const double g : {0.0, 0.5, 2.0}) {
+        ConeWorld w;
+        wg::FlowRouter router(w.nx, w.ny, w.dx);
+        router.route(w.h, w.fixed, 0.0);
+        std::vector<double> q, area;
+        router.accumulate(std::vector<double>(w.n, 1.0 * w.dx * w.dx), q);
+        router.accumulate(std::vector<double>(w.n, w.dx * w.dx), area);
+        const wg::Regolith regolith{w.b, w.sed, w.frac, w.kind};
+        wg::FluvialSettings settings;
+        settings.kSediment = 1e-4;
+        settings.m = 0.5;
+        settings.g = g;
+        settings.dt = 1e4;
+        settings.cellM = w.dx;
+        std::vector<double> qs(w.n), erosion(w.n), deposition(w.n);
+        const auto result = wg::fluvialStep(router, settings, regolith, q, area, std::vector<double>(w.n, 2e-5), w.fixed,
+                                            w.h, qs, erosion, deposition);
+        double onLand = 0.0;
+        for (int c = 0; c < w.n; ++c) {
+            CHECK(w.sed[c] >= 0.0 && std::abs(w.h[c] - w.b[c] - w.sed[c]) < 1e-9);
+            if (!router.ocean()[c] && !w.fixed[c])
+                onLand += w.sed[c];
+        }
+        CHECK(result.iterations <= settings.maxIterations);
+        CHECK(onLand > previous || (g == 0.0 && onLand == 0.0));
+        previous = onLand;
+    }
+}
+
+void testMarineDiffusion() {
+    // A load dropped at a river mouth spreads over the shelf; only sediment moves,
+    // the clay farther than the sand.
+    const int nx = 64, ny = 48, n = nx * ny;
+    std::vector<double> b(n), sed(n, 0.0), h(n);
+    std::vector<wg::Composition> frac(n, wg::Composition{0.0, 1.0, 0.0});
+    const std::vector<int> kind(n, wg::kSand);
+    std::vector<std::uint8_t> active(n, 0), fixed(n, 0);
+    for (int c = 0; c < n; ++c) {
+        const int i = c % nx, j = c / nx;
+        b[c] = i < 48 ? -2.0 - 0.5 * (48 - i) : 5.0 + (i - 48); // land for i >= 48
+        fixed[c] = i == 0 || j == 0 || i == nx - 1 || j == ny - 1;
+        active[c] = !fixed[c] && i < 48;
+    }
+    const int mouth = 24 * nx + 47;
+    sed[mouth] = 400.0;
+    frac[mouth] = {0.0, 0.5, 0.5};
+    for (int c = 0; c < n; ++c)
+        h[c] = b[c] + sed[c];
+    const std::vector<double> rock = b;
+    const wg::Regolith regolith{b, sed, frac, kind};
+    wg::MarineSettings settings;
+    settings.sandD0 = 0.5;
+    settings.finesD0 = 5.0;
+    settings.depthScaleM = 20.0;
+    settings.dt = 1e3;
+    settings.cellM = 10.0;
+    const double exported = wg::marineDiffusion(regolith, h, active, fixed, nx, ny, settings);
+    double total = 0.0, sandDistance = 0.0, sand = 0.0, clayDistance = 0.0, clay = 0.0;
+    for (int c = 0; c < n; ++c) {
+        CHECK(b[c] == rock[c]);
+        CHECK(sed[c] >= 0.0);
+        if (!active[c] && c != mouth)
+            CHECK(sed[c] == 0.0); // nothing climbs onto the land
+        total += sed[c];
+        const double d = std::hypot(c % nx - 47.0, c / nx - 24.0);
+        sand += sed[c] * frac[c][wg::kSand];
+        sandDistance += d * sed[c] * frac[c][wg::kSand];
+        clay += sed[c] * frac[c][wg::kClay];
+        clayDistance += d * sed[c] * frac[c][wg::kClay];
+    }
+    CHECK(std::abs(total + exported / 100.0 - 400.0) < 1e-9 * 400.0);
+    CHECK(sed[mouth] < 50.0);                                  // spread
+    CHECK(clayDistance / clay > 1.5 * sandDistance / sand);     // fines farther
+}
+
+void testLakeFilling() {
+    // The pit of testSimulationLake fills with the sediment of the river.
+    auto config = simulationConfig(2e-5, 1e4, 3e5);
+    config["erosion"]["fluvial"]["deposition_g"] = 1.0;
+    config["pipeline"] = nlohmann::json::array({{{"type", "parameters"}}, {{"type", "island_init"}},
+                                                {{"type", "dig"}, {"x", 100}, {"y", 0}, {"radius_m", 200}},
+                                                {{"type", "simulation"}}});
+    const auto run = simulate(config);
+    const wg::IslandGrid grid(run.state.params().values);
+    const int i = static_cast<int>(100.0 / grid.cellM + grid.nx / 2), j = grid.ny / 2;
+    CHECK(run.state.layer(wg::layers::kSediment).at(i, j) > 1.0f);
+    CHECK(run.state.layer(wg::layers::kLakeDepth).at(i, j) < 18.0f); // dug 20 m deep
+}
+
+void testStrongDiffusionStaysBounded() {
+    // Seed 3 at dx = 4 m: D * dt / dx2 ~ 26 hillslope sub-steps. With each sea
+    // cell held at its own depth, coastal cells piped sediment from shallow to
+    // deep sea cells every sub-step, and the island blew up to 1e11 m.
+    const nlohmann::json config = {
+        {"seed", 3},
+        {"world", {{"width", 1024}, {"length", 1024}}},
+        {"simulation", {{"coarse_resolution", 256}, {"total_duration_years", 1e5}, {"log_interval_steps", 5}}},
+        {"pipeline", nlohmann::json::array({{{"type", "parameters"}}, {{"type", "island_init"}}, {{"type", "simulation"}}})}};
+    const auto run = simulate(config);
+    const float initialHi = wg::valueRange(run.state.layer(wg::layers::kHeightInitial)).max;
+    const float initialLo = wg::valueRange(run.state.layer(wg::layers::kHeightInitial)).min;
+    CHECK(wg::valueRange(run.state.layer(wg::layers::kHeight)).max < initialHi + 100.0f);
+    CHECK(wg::valueRange(run.state.layer(wg::layers::kBedrock)).min >= initialLo - 1.0f);
+}
+
+// --- Climate and coasts (step 3, part 4) ---------------------------------------------
+
+void testRainShadow() {
+    // A north-south ridge in the middle of an island: the windward slope is wet,
+    // the lee dry; turning the wind round swaps them. The land mean is the base rate.
+    for (const double windFrom : {180.0, 0.0}) {
+        auto params = wg::WorldConfig::fromJson(
+                          {{"seed", 1},
+                           {"climate", {{"base_temperature_c", 15}, {"humidity", 0.8}, {"base_precipitation_m_per_year", 1.0},
+                                        {"wind", {{"direction_deg", windFrom}, {"variability_deg", 0}}},
+                                        {"orographic", {{"condensation_rate", 1.0}, {"base_rate", 0.05}}}}}})
+                          .island();
+        const int nx = 120, ny = 60, n = nx * ny;
+        const double dx = 20.0;
+        std::vector<double> s(n);
+        std::vector<std::uint8_t> sea(n);
+        for (int c = 0; c < n; ++c) {
+            const int i = c % nx;
+            sea[c] = i < 20 || i >= 100;
+            s[c] = sea[c] ? -20.0 : 800.0 * std::exp(-0.5 * std::pow((i - 60) / 10.0, 2));
+        }
+        const wg::ClimateModel climate(params, nx, ny, dx);
+        std::vector<double> t, p;
+        climate.temperature(s, 0.0, t);
+        climate.precipitation(s, t, sea, params.climate.baseTemperatureC, p);
+        double west = 0.0, east = 0.0, land = 0.0;
+        for (int j = 0; j < ny; ++j)
+            for (int i = 0; i < nx; ++i) {
+                const int c = j * nx + i;
+                if (i >= 40 && i < 55)
+                    west += p[c];
+                if (i > 65 && i <= 80)
+                    east += p[c];
+                if (!sea[c])
+                    land += p[c];
+            }
+        CHECK(std::abs(land / (80 * ny) - 1.0) < 1e-6); // mean over the land = base rate
+        if (windFrom == 180.0)
+            CHECK(west > 3.0 * east); // westerly wind: wet west slope
+        else
+            CHECK(east > 3.0 * west);
+        CHECK(t[60] < t[30]); // colder on the ridge (lapse rate)
+    }
+}
+
+void testCoastalRetreat() {
+    // A straight cliff facing the swell, hard rock in the north half, soft in the
+    // south: the soft rock retreats faster, the cliff keeps its height, the
+    // platform lies at platform_depth_m, and every cubic meter is accounted for.
+    const int nx = 200, ny = 100, n = nx * ny;
+    std::vector<double> b(n), sed(n, 0.0), h(n), hardness(n);
+    std::vector<wg::Composition> frac(n);
+    const std::vector<int> kind(n, wg::kSand);
+    std::vector<std::uint8_t> sea(n), fixed(n, 0);
+    for (int c = 0; c < n; ++c) {
+        const int i = c % nx, j = c / nx;
+        h[c] = b[c] = i < 50 ? -20.0 : 24.0;
+        sea[c] = i < 50;
+        hardness[c] = j < 50 ? 0.85 : 0.25;
+    }
+    double rock0 = 0.0;
+    for (double v : b)
+        rock0 += v;
+    const wg::Regolith regolith{b, sed, frac, kind};
+    wg::CoastalSettings s;
+    s.waveErosionCoeff = 0.03;
+    s.swellEnergy = 1.0;
+    s.swellDirectionDeg = 180.0;
+    s.fetchMaxM = 3000.0;
+    s.platformDepthM = 6.0;
+    s.exportThreshold = 0.4;
+    s.dt = 2000.0;
+    s.cellM = 8.0;
+    wg::CoastalErosion coast(nx, ny);
+    double exported = 0.0;
+    for (int step = 0; step < 150; ++step) {
+        if (step % 10 == 0)
+            coast.updateExposure(h, sea, s);
+        coast.step(regolith, h, sea, fixed, hardness, s);
+        exported += coast.exported();
+    }
+    CHECK(coast.exposure().size() == static_cast<std::size_t>(n));
+    const auto coastAt = [&](int j) {
+        int i = 0;
+        while (i < nx && h[j * nx + i] < 0.0)
+            ++i;
+        return i;
+    };
+    // Expected: 0.03 * 0.95 / hardness / 30 m per year over 300 ka: ~42 cells hard, ~140 soft.
+    CHECK(coastAt(25) - 50 > 30 && coastAt(25) - 50 < 55);
+    CHECK(coastAt(75) - 50 > 2 * (coastAt(25) - 50));
+    CHECK(h[25 * nx + coastAt(25)] > 23.0);                    // full-height cliff
+    CHECK(std::abs(b[25 * nx + coastAt(25) - 3] + 6.0) < 1e-9); // platform at -6 m
+    double rock = 0.0, stored = 0.0;
+    for (int c = 0; c < n; ++c) {
+        rock += b[c];
+        stored += sed[c];
+    }
+    CHECK(std::abs((rock0 - rock) * 64.0 - stored * 64.0 - exported) < 1e-6 * (rock0 - rock) * 64.0);
+}
+
+// --- Glaciers (step 3, part 5) ---------------------------------------------------------
+
+void testGlacierMass() {
+    // A cold cone: ice builds on it and flows down; every cubic meter is
+    // accounted for (accumulated - ablated - calved = volume), the ice does not
+    // cross a ridge it does not top, and it melts away when it gets warm.
+    const auto params = wg::WorldConfig::fromJson({{"seed", 1}, {"erosion", {{"glacial", {{"sliding_coeff", 3e-9}}}}}}).island();
+    const int nx = 160, ny = 120, n = nx * ny;
+    const double dx = 10.0; // ice grid: 50 m cells, 32 x 24
+    std::vector<double> h(n), rain(n, 1.0);
+    for (int c = 0; c < n; ++c) {
+        const int i = c % nx, j = c / nx;
+        const double r = std::hypot(i - 50.0, j - 60.0);
+        h[c] = std::max(-100.0, 600.0 - 12.0 * r); // a cone at x = 50
+        if (i >= 100 && i < 104)
+            h[c] = 2000.0; // a wall, east of the cone
+        if (i >= 104)
+            h[c] = 0.0;    // a low plain behind it
+    }
+    wg::GlacierModel glacier(params, nx, ny, dx);
+    const wg::GlacierModel::Climate cold{-2.0, 0.0, 6.5, 0.0, 0.0};
+    glacier.relax(h, rain, cold);
+    CHECK(glacier.hasIce());
+    const auto& b = glacier.budget();
+    const double expected = b.accumulated - b.ablated - b.calved - b.melted + b.clamped;
+    CHECK(std::abs(glacier.volume() - expected) < 1e-6 * b.accumulated);
+    CHECK(b.clamped < 1e-3 * b.accumulated);
+    std::vector<double> ice, sliding, melt, balance;
+    glacier.fineFields(ice, sliding, melt, balance);
+    double behindWall = 0.0;
+    for (int j = 0; j < ny; ++j)
+        for (int i = 110; i < nx; ++i)
+            behindWall += ice[j * nx + i];
+    // (the plain gets its own snow: compare with the ice on the cone side)
+    double coneSide = 0.0;
+    for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < 100; ++i)
+            coneSide += ice[j * nx + i];
+    CHECK(coneSide > 0.0);
+    CHECK(*std::max_element(sliding.begin(), sliding.end()) < 3e-9 * 1.5e5 * 1.5e5 * 1.0001); // yield stress cap
+    glacier.meltAll(1000.0);
+    CHECK(!glacier.hasIce());
+    CHECK(std::abs(glacier.volume()) < 1e-9 && glacier.budget().melted > 0.0);
+    (void)behindWall;
 }
 
 void testVoxelVolume() {
@@ -785,9 +1429,25 @@ int main() {
     testTopographyByOrigin();
     testUpliftPatterns();
     testTectonicsByOrigin();
+    testSinkingPhaseDropped();
+    testDurationsAndUplift();
     testGeology();
     testGeologyDeformation();
     testDerivedFaultsFollowTheirPhase();
+    testSimulationSteadyState();
+    testSimulationLake();
+    testRegolith();
+    testHillslopeDiffusion();
+    testThermalCollapse();
+    testSimulationSediment();
+    testFluvialRegression();
+    testFluvialDeposition();
+    testMarineDiffusion();
+    testLakeFilling();
+    testStrongDiffusionStaysBounded();
+    testRainShadow();
+    testCoastalRetreat();
+    testGlacierMass();
     testVoxelVolume();
     testWorldFileRoundTrip();
     testDeterminism();

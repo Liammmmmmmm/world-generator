@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -62,6 +63,12 @@ public:
     Grid2D<std::uint8_t>& editByteLayer(std::string_view name);
     Grid2D<std::uint8_t>& createByteLayer(std::string_view name, int width, int length, std::uint8_t fill = 0);
 
+    // --- Scalars (simulation time, phase progress...) ---------------------------
+    bool hasScalar(std::string_view name) const;
+    double scalar(std::string_view name, double fallback = 0.0) const;
+    void setScalar(std::string_view name, double value);
+    const std::map<std::string, double, std::less<>>& scalars() const { return scalars_; }
+
     // --- 3D blocks -----------------------------------------------------------
     bool hasVoxels() const { return voxels_ != nullptr; }
     const VoxelVolume& voxels() const;
@@ -106,6 +113,7 @@ private:
     std::shared_ptr<const ResolvedParams> params_;
     Layers<float> layers_;
     Layers<std::uint8_t> byteLayers_;
+    std::map<std::string, double, std::less<>> scalars_;
     std::shared_ptr<VoxelVolume> voxels_;
 };
 

@@ -1,2 +1,2 @@
-add_executable(wgen main.cpp Gallery.cpp)
+add_executable(wgen main.cpp Gallery.cpp Calibrate.cpp)
 target_link_libraries(wgen PRIVATE wg)

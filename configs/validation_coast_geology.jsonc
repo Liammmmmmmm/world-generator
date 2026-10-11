@@ -1,0 +1,28 @@
+// Validation de l'étape 3, partie 4 : érosion différentielle des côtes. Le cas des
+// falaises, dans des strates en plis serrés aux flancs presque verticaux (axe est-ouest) qui alternent gneiss (dur,
+// 0.85) et shale (tendre, 0.25) : sur la côte ouest exposée, des bandes
+// perpendiculaires à la côte. Attendu : des baies dans le shale, des caps dans le gneiss
+// ("surface_material" pour les comparer à la côte).
+{
+  "seed": 4,
+  "origin": { "type": "continental", "age": 0.6 },
+  "shape": { "lobe_count": 3, "radius_ratio": 0.55, "elongation": 1.3, "bay_count": 4, "shelf_depth_m": -25 },
+  "initial_topography": { "mode": "peneplain", "base_elevation_m": 20, "regional_dome_m": 5,
+                          "roughness_m": 2, "noise": { "amplitude_m": 3 } },
+  "geology": { "folding": { "enabled": true, "axis_angle_deg": 0, "wavelength_m": 1200, "amplitude_m": 600, "asymmetry": 0, "plunge_deg": 0 }, "fault_count": 0, "intrusion_count": 0,
+               "strata": [ { "material": "gneiss", "thickness_m": 120 }, { "material": "shale", "thickness_m": 120 },
+                           { "material": "gneiss", "thickness_m": 120 }, { "material": "shale", "thickness_m": 120 },
+                           { "material": "gneiss", "thickness_m": 120 }, { "material": "shale", "thickness_m": 120 },
+                           { "material": "gneiss", "thickness_m": 120 }, { "material": "shale", "thickness_m": 120 },
+                           { "material": "gneiss", "thickness_m": 120 }, { "material": "shale", "thickness_m": 120 } ],
+               "strata_top_m": 400, "basement_material": "granite" },
+  "tectonics": { "phase_count": 0 },
+  "climate": { "humidity": 0.5, "base_precipitation_m_per_year": 1.0,
+               "wind": { "direction_deg": 180 }, "swell": { "direction_deg": 180, "energy": 1.0 } },
+  "timeline": { "glaciation_count": 0 },
+  "erosion": { "fluvial": { "k_base": 2e-6, "deposition_g": 0.5 },
+               "hillslope": { "diffusivity_m2_per_year": 0.002 },
+               "coastal": { "wave_erosion_coeff": 0.03, "platform_depth_m": 6, "sediment_export_threshold": 0.4,
+                            "fetch_max_distance_m": 3000 } },
+  "simulation": { "coarse_resolution": 512, "total_duration_years": 3e5, "dt_years": 2000, "log_interval_steps": 25 }
+}

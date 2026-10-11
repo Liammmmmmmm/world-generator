@@ -132,6 +132,7 @@ l'étape) et les paramètres propres à l'étape.
 |---------------|-----------------------------------------------------------------------------------------------|
 | `parameters`  | Étape 1 : publie les paramètres résolus dans l'état du monde (`world.params()`)                |
 | `island_init` | Étape 2 : état initial de l'île sur la grille grossière, sans simulation (voir ci-dessous)     |
+| `simulation`  | Étape 3 : évolution dans le temps (soulèvement, rivières...), voir [wiki](wiki/etape-3-simulation.md) |
 
 #### `island_init`
 

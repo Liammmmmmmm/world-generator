@@ -53,6 +53,11 @@ struct PipelineCallbacks {
     std::function<void(std::size_t index, const Snapshot& result)> onStageDone;
     // Polled between stages and on every progress report.
     std::function<bool()> shouldCancel;
+    // Called on every simulation step (see StageContext::tick): may block to
+    // pause or slow down the run. Returns true while paused / stepping.
+    std::function<bool(std::size_t index)> onTick;
+    // Log lines of the stages.
+    std::function<void(std::size_t index, const std::string& message)> onLog;
     double previewInterval = 0.1;
 };
 

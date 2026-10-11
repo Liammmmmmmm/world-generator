@@ -1,0 +1,27 @@
+// Validation de l'étape 3, partie 5 : glaciers. Une île montagneuse (chaîne de
+// ~300 m), 7 °C au niveau de la mer (pas de glace), puis une
+// glaciation de -6 °C de 600 à 800 ka (+1 °C sur la côte : glaciers sur les hauteurs, niveau marin -80 m),
+// puis le réchauffement et la remontée de la mer.
+// Attendu : des vallées en U et des cirques là où la glace a coulé ("glacial_erosion",
+// "ice" pendant la glaciation), des moraines au front ("sediment"), des fjords là
+// où les vallées glaciaires atteignaient la mer, et en fin de simulation de la
+// glace sur les seuls sommets. Le bilan de la glace dans les logs ("ice: ... drift").
+{
+  "seed": 21,
+  "origin": { "type": "continental", "age": 0.2 },
+  "shape": { "lobe_count": 2, "radius_ratio": 0.7, "elongation": 1.5, "bay_count": 2 },
+  "initial_topography": { "mode": "peneplain", "base_elevation_m": 30, "regional_dome_m": 30 },
+  "geology": { "folding": { "enabled": false }, "fault_count": 0, "intrusion_count": 0,
+               "strata": [], "basement_material": "granite" },
+  "tectonics": { "phases": [ { "type": "collision", "start_years": 0, "end_years": 1.6e6, "rate_m_per_year": 2e-3,
+                               "width_m": 600 } ] },
+  "climate": { "base_temperature_c": 7, "humidity": 0.8, "base_precipitation_m_per_year": 1.5,
+               "wind": { "direction_deg": 180, "variability_deg": 10 } },
+  "timeline": { "glaciations": [ { "start_years": 6e5, "end_years": 8e5, "temperature_offset_c": -6,
+                                   "sea_level_drop_m": 80 } ] },
+  "erosion": { "fluvial": { "k_base": 5e-6, "deposition_g": 0.5 },
+               "hillslope": { "diffusivity_m2_per_year": 0.01 },
+               "glacial": { "sliding_coeff": 3e-9, "erosion_coeff": 1e-5 },
+               "coastal": { "wave_erosion_coeff": 0.05 } },
+  "simulation": { "coarse_resolution": 512, "total_duration_years": 1.6e6, "dt_years": 5000, "log_interval_steps": 20 }
+}

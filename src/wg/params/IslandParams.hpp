@@ -23,6 +23,10 @@ struct IslandParams {
         double x = 0.0, y = 0.0;
     };
 
+    // The world seed, for the noises that the parameters define but do not
+    // store (uplift pattern warps).
+    std::uint64_t seed = 0;
+
     struct World {
         int width = 0;
         int length = 0;
@@ -40,6 +44,15 @@ struct IslandParams {
         double dtYears = 0.0;
         int climateUpdateIntervalSteps = 0;
         double boundaryDepthM = 0.0;
+        struct Processes { // each step of the time loop can be switched off
+            bool uplift = true;
+            bool climate = true;
+            bool glaciers = true;
+            bool fluvial = true;
+            bool hillslope = true;
+            bool marine = true;
+        } processes;
+        int logIntervalSteps = 0; // the simulation logs its figures every N steps
     } simulation;
 
     struct Origin {
@@ -94,6 +107,12 @@ struct IslandParams {
     struct InitialTopography {
         std::string mode; // flat | peneplain | noise | volcanic_cone | atoll | barrier
         double baseElevationM = 0.0;
+        // No flat land at the start (flat areas drain along straight parallel
+        // lines): a regional dome rising inland, and a multi-scale roughness.
+        double regionalDomeM = 0.0;       // rise from the coast to the farthest point inland (not atoll / barrier)
+        double roughnessM = 0.0;          // amplitude of the roughness fBm
+        double roughnessFrequency = 0.0;  // cycles per island radius
+        int roughnessOctaves = 0;
         struct Noise {
             double frequency = 0.0;
             double amplitudeM = 0.0;
@@ -195,10 +214,19 @@ struct IslandParams {
         double widthM = 0.0;
         double falloff = 0.0;      // width of the soft edges, as a fraction of the half-size
         double faultDipDeg = 0.0;  // dip of the faults bounding a block_uplift / horst_graben
+        double negativeFactor = 1.0; // tilt, horst_graben: scale of the lowered part of the pattern
     };
     struct Tectonics {
         std::vector<TectonicPhase> phases;
         double maxUpliftRateMPerYear = 0.0;
+        bool ongoingUplift = false; // the last uplift phase lasts until the end of the run
+        double targetReliefM = 0.0; // steady-state relief the maximum uplift rate is derived from
+        // Every pattern is domain-warped (no straight edge or axis) and modulated
+        // (never uniform); both noises are in cycles per island radius.
+        double upliftWarpAmplitude = 0.0; // relative to the island radius
+        double upliftWarpFrequency = 0.0;
+        double upliftModulation = 0.0;    // the pattern is scaled by lerp(1 - modulation, 1, noise)
+        double upliftModulationFrequency = 0.0;
     } tectonics;
 
     struct Climate {
@@ -216,9 +244,11 @@ struct IslandParams {
             double energy = 0.0;
         } swell;
         struct Orographic {
-            double condensationRate = 0.0;
-            double rainShadowStrength = 0.0;
-            double moistureRechargeOverSea = 0.0;
+            double condensationRate = 0.0;        // share of the moisture rained per km of rise
+            double rainShadowStrength = 0.0;      // reserved (the shadow comes from the depleted moisture)
+            double moistureRechargeOverSea = 0.0; // relaxation per km over the sea
+            double q0 = 1.0;                      // saturation scale: q_sat = q0 exp(0.07 T)
+            double baseRate = 0.0;                // share of the moisture rained per km of travel
         } orographic;
     } climate;
 
@@ -244,28 +274,53 @@ struct IslandParams {
             double n = 0.0;
             double depositionG = 0.0;
             bool precipitationWeighted = true;
+            double kSedimentMult = 1.0; // K on sediment = k_base * k_sediment_mult (on rock: * erodibility)
+            double depositionTolerance = 0.0; // Gauss-Seidel on the sediment flux: relative change to stop at
+            int depositionMaxIterations = 0;
         } fluvial;
+        struct MarineDiffusion { // D(z) = d0 * exp(-depth / depth_scale_m), per grain class (m2/yr)
+            double sandD0 = 0.0;  // gravel and sand: stays near the coast
+            double finesD0 = 0.0; // clay: carried offshore
+            double depthScaleM = 0.0;
+            double mobileLayerM = 0.0; // flux scaled by min(1, sediment / mobile layer)
+        } marineDiffusion;
         struct Hillslope {
             double diffusivityM2PerYear = 0.0;
         } hillslope;
         struct Thermal {
             int iterationsPerStep = 0;
-            double rate = 0.0;
+            double rate = 0.0;                  // share of the height excess moved per pass (0.5: half)
+            double sedimentTalusAngleDeg = 0.0; // repose angle of the sediment cover
         } thermal;
         struct Glacial {
-            double accumulationRate = 0.0;
-            double ablationGradient = 0.0;
-            double deformationCoeff = 0.0;
-            double slidingCoeff = 0.0;
-            double erosionCoeff = 0.0;
+            double accumulationRate = 0.0; // share of the snowfall that becomes ice
+            double ablationGradient = 0.0; // m of ice per year and per °C above 0
+            double slidingCoeff = 0.0;     // u_s = sliding_coeff * tau_b^2 (m/yr/Pa2)
+            double erosionCoeff = 0.0;     // erosion = erosion_coeff * u_s^erosion_exponent
             double erosionExponent = 0.0;
+            double glenA = 0.0;            // Glen's flow law rate factor (Pa^-3 s^-1)
+            double iceDensity = 0.0;       // kg/m3
+            double snowTemperatureC = 0.0; // precipitation falls as snow below this
+            int maxSubsteps = 0;           // per relaxation of the ice
+            double convergenceTol = 0.0;   // relaxed when mean |dH/dt| < this (m/yr)
+            double iceThresholdM = 0.0;    // thicker ice stops rivers and hillslopes; thinner: moraines drop
+            double calvingDepthM = 0.0;    // ice on water deeper than this calves off
+            double iceGridCellM = 0.0;     // cell of the ice grid
         } glacial;
+        struct Reef {                       // coral islands: the reef keeps up with the sea level
+            bool enabled = false;
+            double growthRate = 0.0; // m/yr
+            double maxDepthM = 0.0;  // grows between this depth and the surface
+        } reef;
         struct Coastal {
             double waveErosionCoeff = 0.0;
             int fetchRayCount = 0;
             double fetchMaxDistanceM = 0.0;
-            double platformDepthM = 0.0;
+            double platformDepthM = 0.0;  // abrasion platform, below sea level (> 0)
             double sedimentExportThreshold = 0.0;
+            int exposureUpdateIntervalSteps = 0;
+            double platformAttenuationM = 0.0; // waves damped by exp(-shallows width / this)
+            double sedimentHardness = 0.0; // of a sediment cover, against the waves
         } coastal;
         struct DetailHydraulic {
             std::string method; // droplet | pipe
@@ -338,6 +393,19 @@ struct IslandParams {
         } seaNotches;
     } voxelization;
 
+    // Multipliers of the coefficients of each process, by origin (the island
+    // uses those of its origin.type).
+    struct ProcessMultipliers {
+        double fluvial = 1.0;          // k_base
+        double hillslope = 1.0;        // hillslope diffusivity
+        double thermal = 1.0;          // thermal collapse rate (capped at 1)
+        double marine = 1.0;           // wave erosion
+        double marineDiffusion = 1.0;  // marine diffusivities
+        double glacial = 1.0;          // glacial erosion
+    };
+    std::map<std::string, ProcessMultipliers> processMultipliers;
+    const ProcessMultipliers& multipliers() const { return processMultipliers.at(origin.type); }
+
     struct Toggle {
         bool enabled = false;
     };
@@ -375,6 +443,7 @@ struct ResolvedParams {
     IslandParams values;
     std::vector<ParamEntry> entries; // in resolution order
     nlohmann::json config;           // the input config, as given
+    std::vector<std::string> notes;  // decisions taken by the resolution (logged by the parameters stage)
 
     // The complete config with every value filled in (can be fed back as a
     // config to reproduce the exact same parameters).

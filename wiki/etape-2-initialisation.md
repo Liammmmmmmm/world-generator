@@ -235,6 +235,27 @@ de la terre, `h_land`, est d'abord calculé sur toute la grille, puis combiné a
 | `atoll` | `ring_height_m + ring_noise_m · fbm(q)` (1 à 4 m, ou 30 à 60 m pour un makatea) |
 | `volcanic_cone` | `max(base, max_v cône_v(r))`, plus les coulées (voir ci-dessous) |
 
+**Pas de terrain plat.** Une zone plate s'écoule en lignes droites parallèles : sans pente,
+le drainage suit la pente ε du remplissage des dépressions depuis le déversoir (diagnostic D5
+de l'étape 3), et l'érosion en fait des canyons rectilignes. Tous les modes reçoivent donc,
+en plus :
+
+```
+dome  = regional_dome_m · smoothstep(0, D, s_lissée)   // D : plus grande distance à la côte ; pas pour atoll et barrier
+rough = roughness_m · fbm(q)                           // roughness_octaves (4 à 6) octaves, roughness_frequency (4 à 8) cycles par R
+h_land += dome + rough
+h_land  = smoothMax(h_land, 0,5 + 0,3 · (dome + roughness_m · (fbm + 1)), 1 m)
+```
+
+- **Le dôme régional** (5 à 30 m selon l'origine) donne à toute l'île une pente vers la mer.
+  Il monte jusqu'au point le plus éloigné de la côte : avec `coast_dist / R`, comme dans la
+  formule de départ, une île allongée n'en recevrait qu'une petite partie.
+- **La rugosité** (2 à 10 m ; 0,5 à 1 m pour les atolls et barrières, plats par nature) crée
+  des bassins versants dès le départ.
+- **Le plancher** : une terre que le bruit fait passer sous la mer était ramenée à 0 m, en
+  aplats. Elle repose maintenant sur un plancher bas qui garde la pente du dôme et une part
+  de la rugosité.
+
 **Volcans** (`initial_topography.volcano.*`, flux `"volcanoes"`) :
 
 - **Placement :** par rejet, dans la moitié intérieure de l'île (distance à la côte au moins
@@ -299,9 +320,9 @@ simple `lerp(h_sea, h_land, mask)` placerait la côte là où le mélange passe 
 de transition, là où les petites octaves du warp transforment la côte en confettis. Une
 terre qui tomberait sous le niveau de la mer est ramenée au niveau de la mer.
 
-La micro-perturbation (1 mm au plus) sert l'étape 3. Sans elle, les zones plates (plateau,
-mode `flat`) n'auraient aucune pente : le calcul du drainage y dégénérerait, avec des
-directions d'écoulement indéfinies et des égalités partout.
+La micro-perturbation (1 mm au plus) ne sert qu'à lever les égalités de hauteur pour le
+drainage de l'étape 3 (sur le plateau continental, par exemple). Elle ne suffit pas à faire
+s'écouler une zone plate naturellement : c'est le rôle du dôme et de la rugosité.
 
 ### 3.4 Conditions aux limites
 
@@ -321,48 +342,74 @@ Les phases dépendent de l'origine (étape 1) :
 | Origine | Phases |
 |---------|--------|
 | volcanique | aucune ou un dôme faible |
-| sédimentaire, corallienne | aucune ou une subsidence faible |
-| continentale | 1 à 4, tous les types ; la première `collision` suit l'axe principal de l'île |
+| sédimentaire, corallienne | aucune ou une subsidence faible, plafonnée : son enfoncement total ne dépasse pas 50 % de l'altitude moyenne initiale estimée de l'île |
+| continentale | 1 à 4 : `collision` 40 %, `dome` 30 %, `tilt`, `block_uplift`, `horst_graben` 10 % chacun, jamais de `subsidence` (sauf forcée) ; la première `collision` suit l'axe principal de l'île |
 
-Pour une phase de centre `c` et d'angle `angle_deg`, `u` est la coordonnée le long de l'axe
-et `v` la coordonnée perpendiculaire :
+**Contrôle après tirage** (`meanPhaseUplift` dans `IslandParams.cpp`). On calcule le
+soulèvement total moyen (`taux × durée × motif`) de chaque phase sur l'ellipse de l'île
+(demi-longueur `R` le long de l'axe, `R / elongation` en travers). Tant que la somme est
+négative (au-delà de la subsidence permise pour les îles non continentales), la phase qui
+l'abaisse le plus est retirée. Une phase dont le type est forcé par la config n'est jamais
+retirée. Le retrait est noté dans le journal de l'étape `parameters`, et la config résolue
+(`toJson`) reste exacte : les phases suivantes sont renumérotées. Sur 200 seeds, cela arrive
+à 3 îles continentales, à chaque fois à cause d'un `tilt`.
+
+Le motif est calculé par [UpliftPattern.{hpp,cpp}](../src/wg/island/UpliftPattern.hpp),
+partagé avec la géologie et le contrôle ci-dessus. Pour une phase de centre `c` et d'angle
+`angle_deg`, `u` est la coordonnée le long de l'axe et `v` la coordonnée perpendiculaire,
+**prises au point déformé** :
 
 ```
+p'  = p + R · uplift_warp_amplitude · (fbm_a(q), fbm_b(q))     // basse fréquence : uplift_warp_frequency
+(u, v) = repère de la phase en p'
+mod = lerp(1 − uplift_modulation, 1, bruit(q))                 // uplift_modulation_frequency
+
 gauss(t) = exp(−t²/2)                   // width_m joue le rôle d'un écart-type
 taper(t) = 1 − smoothstep((1 − falloff)/2, 1/2, |t|)    // 1 au milieu, 0 aux extrémités
 
-dome          P = gauss(|p − c| / width_m)
-subsidence    P = −gauss(|p − c| / width_m)
+dome          P = gauss(|(u, v)| / width_m)
+subsidence    P = −gauss(|(u, v)| / width_m)
 collision     P = gauss(v / width_m) · taper(u / length_m)
-block_uplift  P = taper(u / length_m) · taper(v / width_m)          // rectangle à bords étroits
-horst_graben  P = ±1 selon la parité de floor(v / width_m)          // bandes parallèles à l'axe
+block_uplift  P = smoothstep(0, falloff · width_m / 2, −sdf(u, v))  // rectangle à coins arrondis
+horst_graben  P = +1 (horst) ou −negative_factor (graben) selon la parité de floor(v / width_m)
                   · smoothstep(0, falloff · width_m / 2, distance à la limite de bande)
                   · taper(u / length_m)                            // longueur finie
-tilt          P = clamp(v / width_m, −1, 1)
+tilt          P = clamp(v / width_m, −1, 1), partie négative × negative_factor
 
-P *= smoothstep(0, 1, mask) ;  P = 0 sur l'anneau FIXED
+P *= mod ;  P *= smoothstep(0, 1, mask) ;  P = 0 sur l'anneau FIXED
 ```
 
-Le `falloff` est tiré étroit pour `block_uplift` et `horst_graben` (0,05 à 0,2), et large
-pour les autres (0,2 à 1).
+- **Le warp** (`uplift_warp_amplitude`, 0,1 à 0,25 R) : aucun bord ni axe n'est rectiligne.
+- **La modulation** (`uplift_modulation`, 0,3 à 0,6) : le soulèvement n'est jamais uniforme.
+- **Le bloc** est un rectangle aux coins arrondis sur la moitié de sa plus petite
+  demi-taille (`sdf` est la distance signée à ce contour, négative dedans).
+- **`negative_factor`** (0,3 par défaut, forçable) : un basculement ou des grabens ne
+  doivent pas faire couler l'île.
+- **Le `falloff`** est tiré dans [0,2 ; 0,35] pour `block_uplift` et `horst_graben` (des bords
+  d'au moins 10 % de la largeur), et dans [0,2 ; 1] pour les autres.
+- **La taille** : la longueur et la largeur d'une phase sont limitées à 1,2 fois le diamètre
+  de l'île (de l'ellipse ci-dessus) dans leur direction.
 
-**Failles cohérentes.** L'étape 1 génère des failles sur les bords de chaque
-`block_uplift` et `horst_graben` (`phaseFaults` dans `IslandParams.cpp`), et les ajoute à
-`geology.faults` :
+**Failles dérivées.** L'étape 1 génère des failles sur les bords nominaux (non déformés)
+de chaque `block_uplift` et `horst_graben` (`phaseFaults` dans `IslandParams.cpp`) :
 
 - **bloc :** quatre failles, une par bord, côté soulevé vers l'intérieur, décalage
   `rate × durée` ;
 - **horst / graben :** une faille par limite de bandes qui croise l'île, côté horst soulevé,
-  décalage `2 × rate × durée` (de −U à +U) ;
+  décalage `(1 + negative_factor) × rate × durée` ;
 - **pendage :** `fault_dip_deg` de la phase.
+
+Ces traces droites ne sont qu'une approximation, listée pour information : la géologie
+déplace les blocs entre des murs qui suivent le contour **déformé** du motif (voir 3.6).
 
 **Convention d'une faille :** une trace centrée sur (`x`, `y`), le long de `angle_deg`. Son
 côté **positif**, à gauche de la direction (normale `(−sin, cos)`), monte de `offset_m`.
 
 Ces failles dérivées sont visibles dans la vue `parameters` (`geology.derived_faults`). Elles
 sont toujours recalculées à partir des phases : la config ne peut pas les fixer, ce qui
-préserve l'aller-retour de `toJson()`. Le calque `fault_traces` dessine toutes les failles
-sur la carte, pour vérifier qu'elles bordent bien les motifs.
+préserve l'aller-retour de `toJson()`. Le calque `fault_traces` dessine les failles anciennes
+(segments) et les murs réels des phases à failles (là où le bloc change d'une cellule à
+l'autre au niveau de la mer).
 
 ### 3.6 Géologie ([Geology.{hpp,cpp}](../src/wg/island/Geology.hpp))
 
@@ -398,18 +445,20 @@ material(x, y, z, cum_uplift, z_ref, D_fold):
 
   Ces failles sont indépendantes et leurs décalages s'additionnent ; elles sont décalées dès
   le départ.
-- **Phases à failles** (`block_uplift`, `horst_graben`) : elles déplacent des **blocs
-  entiers** entre des murs inclinés de `fault_dip_deg`. Les murs passent par le contour de la
-  phase au niveau de la mer, et s'écartent du bloc soulevé en profondeur, comme les failles
-  normales d'un horst :
-  - **bloc :** il monte de `U` (le soulèvement total de la phase) ;
-  - **bandes :** les horsts montent de `U`, les grabens descendent de `U`.
+- **Phases à failles** (`block_uplift`, `horst_graben`, `UpliftPattern::blockShare`) : elles
+  déplacent des **blocs entiers** entre des murs inclinés de `fault_dip_deg`. Au niveau de la
+  mer, les murs passent au milieu des bords adoucis du motif déformé, et en profondeur ils
+  s'écartent du bloc soulevé, comme les failles normales d'un horst :
+  - **bloc :** il monte de `U · mod` (`U` le soulèvement total de la phase, `mod` sa
+    modulation) ;
+  - **bandes :** les horsts montent de `U · mod`, les grabens descendent de
+    `negative_factor · U · mod`.
 
   Le déplacement est pondéré par l'**avancement de la phase** (`setPhaseProgress`). Il est nul
   à l'étape 2, puisque la phase n'a pas encore agi : un décalage des strates sans relief
-  correspondant n'aurait pas de sens. Les failles dérivées (`geology.derived_faults`) sont les
-  murs de ces blocs. Elles servent au tracé (`fault_traces`) et à l'affichage, mais ne
-  s'additionnent pas : quatre failles autour d'un bloc le soulèveraient quatre fois.
+  correspondant n'aurait pas de sens. Les failles dérivées (`geology.derived_faults`) ne
+  s'additionnent pas : ce ne sont que les traces nominales de ces murs, et quatre failles
+  autour d'un bloc le soulèveraient quatre fois.
 - **Intrusions** (`geology.intrusions`) : des dômes d'un seul matériau. Pour une île
   continentale qui a une phase `collision`, elles sont placées dans la zone de la chaîne.
 - **`z_ref`** vaut `sea + geology.strata_top_m`. Pour une origine volcanique, c'est
@@ -436,7 +485,7 @@ roches), sinon elles monteraient deux fois.
 | `h` | île, liseré bleu clair (plateau), pente ombrée vers un fond plus sombre, cadre uniforme au bord |
 | `mask` | blanc sur l'île, noir en mer, transition douce |
 | `coast_dist` | côte blanche, terre rouge vers l'intérieur, mer bleue vers le large |
-| `uplift_pattern_k` | dôme rond ou chaîne orientée, s'atténuant aux extrémités, nul en mer |
+| `uplift_pattern_k` | dôme ou chaîne orientée aux contours irréguliers (jamais de bord rectiligne), modulé, s'atténuant aux extrémités, nul en mer |
 | `surface_material` | couleurs de la légende ; changer `geology.strata_top_m` change ce qui affleure |
 
 Les tests ([tests/main.cpp](../tests/main.cpp), `testIslandInit`, `testIslandFitsInMap`)

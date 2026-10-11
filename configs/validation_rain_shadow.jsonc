@@ -1,0 +1,25 @@
+// Validation de l'étape 3, partie 4 : ombre pluviométrique. Une île allongée
+// nord-sud, soulevée par une chaîne dans son axe, sous un vent d'ouest
+// (wind.direction_deg = 180 : le vent vient de l'ouest, -x). Attendu : le versant
+// ouest humide ("precipitation" élevé, plus raviné), le versant est sec. Avec
+// "direction_deg": 0 (vent d'est), les deux côtés s'échangent.
+{
+  "seed": 21,
+  "origin": { "type": "continental", "age": 0.2 },
+  "shape": { "lobe_count": 1, "lobe_spread": 0, "radius_ratio": 0.75, "elongation": 2.0, "main_axis_deg": 90,
+             "bay_count": 0 },
+  "initial_topography": { "mode": "peneplain", "base_elevation_m": 20, "regional_dome_m": 20 },
+  "geology": { "folding": { "enabled": false }, "fault_count": 0, "intrusion_count": 0,
+               "strata": [], "basement_material": "granite" },
+  "tectonics": { "uplift_warp_amplitude": 0.1, "uplift_modulation": 0.3,
+                 "phases": [ { "type": "collision", "center": [0, 0], "angle_deg": 90, "length_m": 3000,
+                               "width_m": 300, "rate_m_per_year": 1.5e-3, "start_years": 0, "end_years": 1e6 } ] },
+  "climate": { "base_temperature_c": 18, "humidity": 0.8, "base_precipitation_m_per_year": 1.5,
+               "wind": { "direction_deg": 180, "strength": 0.8, "variability_deg": 10 },
+               "orographic": { "condensation_rate": 1.0, "base_rate": 0.05, "moisture_recharge_over_sea": 0.3 } },
+  "timeline": { "glaciation_count": 0 },
+  "erosion": { "fluvial": { "k_base": 1e-5, "deposition_g": 0.5, "precipitation_weighted": true },
+               "hillslope": { "diffusivity_m2_per_year": 0.01 },
+               "coastal": { "wave_erosion_coeff": 0.0 } },
+  "simulation": { "coarse_resolution": 512, "total_duration_years": 1e6, "dt_years": 5000, "log_interval_steps": 50 }
+}

@@ -14,7 +14,7 @@ static_assert(std::endian::native == std::endian::little, "WorldFile assumes a l
 namespace {
 
 constexpr std::array<char, 4> kMagic{'W', 'G', 'W', '\0'};
-constexpr std::uint32_t kVersion = 4;
+constexpr std::uint32_t kVersion = 5;
 
 template <typename T>
 void writePod(std::ofstream& out, const T& value) {
@@ -97,6 +97,12 @@ void writeWorld(const WorldState& world, const std::filesystem::path& path) {
         writeSpan(out, grid.data());
     }
 
+    writePod(out, static_cast<std::uint32_t>(world.scalars().size()));
+    for (const auto& [name, value] : world.scalars()) {
+        writeString(out, name);
+        writePod(out, value);
+    }
+
     writePod<std::uint8_t>(out, world.hasVoxels());
     if (world.hasVoxels()) {
         const VoxelVolume& voxels = world.voxels();
@@ -170,6 +176,12 @@ WorldState readWorld(const std::filesystem::path& path) {
         const auto length = readPod<std::int32_t>(in);
         checkSize(width, length);
         readSpan(in, world.createByteLayer(name, width, length).data());
+    }
+
+    const auto scalarCount = readPod<std::uint32_t>(in);
+    for (std::uint32_t i = 0; i < scalarCount && in; ++i) {
+        const std::string name = readString(in);
+        world.setScalar(name, readPod<double>(in));
     }
 
     if (readPod<std::uint8_t>(in)) {

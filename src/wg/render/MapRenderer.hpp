@@ -66,6 +66,7 @@ Rgb materialColor(std::string_view name);
 //   Scalar:      grayscale, min..max
 //   Diverging:   blue (negative) / white (0) / red (positive), each sign scaled
 //                to its own extent
+//   LogScalar:   dark to light blue, log scale (discharge)
 //   Categorical: one color per category (materials get materialColor)
 class LayerPalette {
 public:
@@ -78,6 +79,7 @@ private:
     LayerStyle style_;
     ValueRange range_;
     double seaLevelM_;
+    double logFloor_ = 0.0; // smallest positive value (LogScalar)
     std::vector<Rgb> categories_;
 };
 

@@ -59,9 +59,7 @@ Geology::Geology(const IslandParams& params) {
         const auto& p = phases[k];
         if (p.type != "block_uplift" && p.type != "horst_graben")
             continue;
-        const double a = p.angleDeg * kDegToRad;
-        faultedPhases_.push_back({static_cast<int>(k), p.type == "horst_graben", p.center.x, p.center.y, std::cos(a),
-                                  std::sin(a), p.lengthM, p.widthM, p.falloff, cotDip(p.faultDipDeg),
+        faultedPhases_.push_back({static_cast<int>(k), UpliftPattern(params, static_cast<int>(k)),
                                   p.rateMPerYear * (p.endYears - p.startYears)});
     }
     faultTipTaper_ = g.faultTipTaper;
@@ -98,32 +96,12 @@ double Geology::faultOffset(double x, double y, double z) const {
         offset += f.offset * tip;
     }
 
-    // Fault-bounded phases: blocks between walls through their surface outline
-    // at sea level, dipping away from the raised block (normal faults: a horst
-    // widens with depth). Shift of the walls at this altitude:
+    // Fault-bounded phases: blocks between dipping walls, moved by the share
+    // of the phase done so far.
     for (const FaultedPhase& p : faultedPhases_) {
         const double share = static_cast<std::size_t>(p.index) < phaseProgress_.size() ? phaseProgress_[p.index] : 0.0;
-        if (share == 0.0)
-            continue;
-        const double widen = (seaLevel_ - z) * p.cotDip; // > 0 below sea level
-        const double dx = x - p.cx, dy = y - p.cy;
-        const double u = dx * p.ux + dy * p.uy, v = -dx * p.uy + dy * p.ux;
-        if (!p.horstGraben) {
-            if (std::abs(u) < p.length / 2 + widen && std::abs(v) < p.width / 2 + widen)
-                offset += share * p.uplift;
-            continue;
-        }
-        // Bands of width w across the axis: horsts (even bands) raised by U,
-        // grabens lowered by U; each horst widens by `widen` on both sides.
-        if (std::abs(u) > p.length / 2 + widen)
-            continue;
-        const double band = std::floor(v / p.width);
-        const double inBand = v - band * p.width; // [0, w)
-        const bool evenBand = std::fmod(std::abs(band), 2.0) == 0.0;
-        const bool nearEdge = inBand < std::abs(widen) || inBand > p.width - std::abs(widen);
-        // Below sea level a graben edge belongs to the neighbouring horst; above, a horst edge to the graben.
-        const bool horst = evenBand ? !(widen < 0.0 && nearEdge) : (widen > 0.0 && nearEdge);
-        offset += share * (horst ? p.uplift : -p.uplift);
+        if (share != 0.0)
+            offset += share * p.uplift * p.pattern.blockShare(x, y, z);
     }
     return offset;
 }

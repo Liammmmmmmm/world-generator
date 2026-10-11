@@ -1,0 +1,24 @@
+// Validation de l'étape 3, partie 4 : falaises (cas « Ouessant »). Un plateau de
+// granite à 20 m, sans soulèvement, sous une houle forte venant de l'ouest
+// (swell.direction_deg = 180). Attendu : une côte de falaises verticales de toute
+// la hauteur du plateau, qui recule surtout à l'ouest ; une plateforme d'abrasion
+// à platform_depth_m sous l'eau devant elles ; quelques plages dans les baies
+// abritées ("sediment" au-dessus du niveau marin, côte est).
+{
+  "seed": 4,
+  "origin": { "type": "continental", "age": 0.6 },
+  "shape": { "lobe_count": 3, "radius_ratio": 0.55, "elongation": 1.3, "bay_count": 4, "shelf_depth_m": -25 },
+  "initial_topography": { "mode": "peneplain", "base_elevation_m": 20, "regional_dome_m": 5,
+                          "roughness_m": 2, "noise": { "amplitude_m": 3 } },
+  "geology": { "folding": { "enabled": false }, "fault_count": 0, "intrusion_count": 0,
+               "strata": [], "basement_material": "granite" },
+  "tectonics": { "phase_count": 0 },
+  "climate": { "humidity": 0.5, "base_precipitation_m_per_year": 1.0,
+               "wind": { "direction_deg": 180 }, "swell": { "direction_deg": 180, "energy": 1.0 } },
+  "timeline": { "glaciation_count": 0 },
+  "erosion": { "fluvial": { "k_base": 2e-6, "deposition_g": 0.5 },
+               "hillslope": { "diffusivity_m2_per_year": 0.002 },
+               "coastal": { "wave_erosion_coeff": 0.03, "platform_depth_m": 6, "sediment_export_threshold": 0.4,
+                            "fetch_max_distance_m": 3000 } },
+  "simulation": { "coarse_resolution": 512, "total_duration_years": 3e5, "dt_years": 2000, "log_interval_steps": 25 }
+}

@@ -11,16 +11,18 @@
 #include "wg/island/Geology.hpp"
 #include "wg/island/IslandGrid.hpp"
 #include "wg/island/IslandLayers.hpp"
+#include "wg/island/UpliftPattern.hpp"
 #include "wg/noise/Fbm.hpp"
 
 namespace wg {
 
 namespace {
 
-// Size of the random perturbation added to every height (m). Without it, flat
-// areas (a flat initial topography, the shelf) have no slope at all and the
-// drainage computation of step 3 degenerates there (undefined flow directions,
-// ties everywhere). 1 mm is far below anything visible.
+// Size of the random perturbation added to every height (m), only to break
+// the ties between equal heights (the shelf, a forced flat topography) for the
+// drainage computation of step 3. It does not make a flat area drain
+// naturally: the land gets a regional dome and a roughness for that. 1 mm is
+// far below anything visible.
 constexpr double kHeightJitterM = 1e-3;
 
 double smoothstep(double edge0, double edge1, double x) {
@@ -37,13 +39,6 @@ double lerp(double a, double b, double t) {
 // Gaussian bump, 1 at 0, with unit standard deviation.
 double gauss(double t) {
     return std::exp(-0.5 * t * t);
-}
-
-// 1 in the middle of a feature, falling to 0 at its ends (|t| = 0.5, t being
-// the position along the feature divided by its length). `falloff` is the
-// fraction of the half-length over which it falls.
-double taper(double t, double falloff) {
-    return 1.0 - smoothstep(0.5 * (1.0 - falloff), 0.5, std::abs(t));
 }
 
 // Polynomial smooth minimum: min(a, b), rounded over a band of width k.
@@ -263,7 +258,12 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
     Grid2D<float>& surfaceMaterial = world.createLayer(layers::kSurfaceMaterial, grid.nx, grid.ny, 0.0f,
                                                        {LayerStyle::Categorical, geology.materialNames()});
     const Grid2D<float>& cumUplift = world.createLayer(layers::kCumUplift, grid.nx, grid.ny);
-    world.createLayer(layers::kSediment, grid.nx, grid.ny);
+    world.createLayer(layers::kSediment, grid.nx, grid.ny, 0.0f, {LayerStyle::LogScalar, {}}); // thin layers matter
+    world.createLayer(layers::kSedimentGravel, grid.nx, grid.ny);
+    world.createLayer(layers::kSedimentSand, grid.nx, grid.ny);
+    world.createLayer(layers::kSedimentClay, grid.nx, grid.ny);
+    world.createLayer(layers::kSedimentDominant, grid.nx, grid.ny, 0.0f,
+                      {LayerStyle::Categorical, {"none", "gravel", "sand", "clay"}});
     world.createLayer(layers::kIce, grid.nx, grid.ny);
     Grid2D<std::uint8_t>& flags = world.createByteLayer(layers::kFlags, grid.nx, grid.ny);
 
@@ -469,11 +469,20 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
     const Fbm topoNoise(topoSeed, {topo.noise.frequency, topo.noise.octaves, topo.noise.lacunarity, topo.noise.gain});
     Grid2D<float> land(grid.nx, grid.ny);
 
-    // Barrier crest: highest where the island is widest from both coasts.
-    double halfWidth = 0.0;
-    if (topo.mode == "barrier")
-        for (float d : smoothDist.data())
-            halfWidth = std::max(halfWidth, static_cast<double>(d));
+    // Farthest point from the coast: the top of the regional dome and of the
+    // barrier crest.
+    double inland = 0.0;
+    for (float d : smoothDist.data())
+        inland = std::max(inland, static_cast<double>(d));
+
+    // No flat land: a flat area drains along straight parallel lines (the
+    // drainage follows the tie-breaking gradient of the depression filling),
+    // which erosion turns into straight canyons. Every mode gets a multi-scale
+    // roughness, and all but the naturally flat atoll and barrier a regional
+    // dome rising inland.
+    const bool flatByNature = topo.mode == "atoll" || topo.mode == "barrier";
+    const Fbm roughness(deriveSeed(topoSeed, "roughness"),
+                        {topo.roughnessFrequency, topo.roughnessOctaves, 2.0, 0.5});
 
     Rng volcanoRng(deriveSeed(topoSeed, "volcanoes"));
     const std::vector<Vent> vents =
@@ -492,7 +501,7 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
             if (topo.mode == "peneplain" || topo.mode == "noise") {
                 hLand += topo.noise.amplitudeM * n;
             } else if (topo.mode == "barrier") {
-                hLand += topo.barrier.crestHeightM * smoothstep(0.0, halfWidth, smoothDist.at(i, j)) +
+                hLand += topo.barrier.crestHeightM * smoothstep(0.0, inland, smoothDist.at(i, j)) +
                          topo.noise.amplitudeM * n;
             } else if (topo.mode == "atoll") {
                 hLand = topo.atoll.ringHeightM + topo.atoll.ringNoiseM * n;
@@ -507,7 +516,14 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
                 // everywhere and every lava flow would be a straight spoke.
                 hLand += topo.volcano.flankNoiseM * flankNoise(grid.x(i) / R, grid.y(j) / R);
             }
-            land.at(i, j) = static_cast<float>(hLand);
+            const double dome = flatByNature ? 0.0 : topo.regionalDomeM * smoothstep(0.0, inland, smoothDist.at(i, j));
+            const double rough = roughness(grid.x(i) / R, grid.y(j) / R);
+            hLand += dome + topo.roughnessM * rough;
+            // Land that the noise takes below sea level would be clamped to a
+            // flat 0 (see the coast ramp): it rests on a low floor instead, which
+            // keeps the dome's slope and part of the roughness.
+            const double floor = 0.5 + 0.3 * (dome + topo.roughnessM * (rough + 1.0));
+            land.at(i, j) = static_cast<float>(smoothMax(hLand, floor, 1.0));
         }
     }
     if (topo.mode == "volcanic_cone")
@@ -596,49 +612,37 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
 
     // --- 5. Uplift patterns (shape only: rate and time are applied in step 3) --
     for (std::size_t k = 0; k < p.tectonics.phases.size(); ++k) {
-        const auto& phase = p.tectonics.phases[k];
+        const UpliftPattern uplift(p, static_cast<int>(k));
         Grid2D<float>& pattern = *patterns[k];
-        const double angle = phase.angleDeg * std::numbers::pi / 180.0;
-        const double ax = std::cos(angle), ay = std::sin(angle); // along the axis (u)
-
+        Grid2D<float> blocks(grid.nx, grid.ny); // faulted phases: block of each cell at sea level
         for (int j = 0; j < grid.ny; ++j) {
             for (int i = 0; i < grid.nx; ++i) {
+                if (uplift.faulted())
+                    blocks.at(i, j) = static_cast<float>(uplift.blockShare(grid.x(i), grid.y(j), sea));
                 if (flags.at(i, j) & layers::kFixed)
                     continue; // stays 0
-                const double dx = grid.x(i) - phase.center.x, dy = grid.y(j) - phase.center.y;
-                const double u = dx * ax + dy * ay;
-                const double v = -dx * ay + dy * ax;
-
-                double value = 0.0;
-                if (phase.type == "dome") {
-                    value = gauss(std::hypot(dx, dy) / phase.widthM);
-                } else if (phase.type == "subsidence") {
-                    value = -gauss(std::hypot(dx, dy) / phase.widthM);
-                } else if (phase.type == "collision") {
-                    value = gauss(v / phase.widthM) * taper(u / phase.lengthM, phase.falloff);
-                } else if (phase.type == "block_uplift") {
-                    value = taper(u / phase.lengthM, phase.falloff) * taper(v / phase.widthM, phase.falloff);
-                } else if (phase.type == "horst_graben") {
-                    // Bands of width width_m along the axis: +1 (horst) for even
-                    // floor(v / w), -1 (graben) for odd, switching over a narrow
-                    // band around each boundary; finite along the axis.
-                    const double band = std::floor(v / phase.widthM);
-                    const double sign = std::fmod(std::abs(band), 2.0) == 0.0 ? 1.0 : -1.0;
-                    const double toBoundary = std::min(v - band * phase.widthM, (band + 1.0) * phase.widthM - v);
-                    value = sign * smoothstep(0.0, phase.falloff * phase.widthM / 2.0, toBoundary) *
-                            taper(u / phase.lengthM, phase.falloff);
-                } else if (phase.type == "tilt") {
-                    value = std::clamp(v / phase.widthM, -1.0, 1.0);
-                }
-
-                pattern.at(i, j) = static_cast<float>(value * smoothstep(0.0, 1.0, mask.at(i, j)));
+                pattern.at(i, j) =
+                    static_cast<float>(uplift.value(grid.x(i), grid.y(j)) * smoothstep(0.0, 1.0, mask.at(i, j)));
             }
+        }
+        // Fault traces (validation): the walls of the faulted phases, where the
+        // block changes from a cell to the next.
+        if (uplift.faulted()) {
+            for (int j = 0; j + 1 < grid.ny; ++j)
+                for (int i = 0; i + 1 < grid.nx; ++i)
+                    if ((blocks.at(i, j) > 0.0f) != (blocks.at(i + 1, j) > 0.0f) ||
+                        (blocks.at(i, j) > 0.0f) != (blocks.at(i, j + 1) > 0.0f) ||
+                        (blocks.at(i, j) < 0.0f) != (blocks.at(i + 1, j) < 0.0f) ||
+                        (blocks.at(i, j) < 0.0f) != (blocks.at(i, j + 1) < 0.0f))
+                        faultTraces.at(i, j) = 1.0f;
         }
         context.progress(static_cast<float>(lerp(0.75, 0.9, static_cast<double>(k + 1) / p.tectonics.phases.size())));
     }
 
-    // Fault traces (validation): the cells crossed by each fault segment.
+    // Fault traces of the old faults: the cells crossed by each fault segment.
     for (const auto& fault : p.geology.faults) {
+        if (fault.phase >= 0)
+            continue; // a wall of a faulted phase, traced above
         const double a = fault.angleDeg * std::numbers::pi / 180.0;
         const int steps = static_cast<int>(std::ceil(fault.lengthM / (grid.cellM / 2.0)));
         for (int k = 0; k <= steps; ++k) {

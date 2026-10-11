@@ -9,6 +9,7 @@ notice d'utilisation (build, commandes, contrôles du viewer).
 | [Vue d'ensemble](README.md) (cette page) | Architecture, flux de données, concepts transverses |
 | [Étape 1 : paramètres](etape-1-parametres.md) | Lecture de la config, tirage depuis la seed, overrides, validation |
 | [Étape 2 : initialisation de l'île](etape-2-initialisation.md) | Masque, bathymétrie, topographie, soulèvement, géologie |
+| [Étape 3 : simulation](etape-3-simulation.md) | Boucle temporelle, soulèvement, routage de l'eau, érosion fluviale ; roches, sédiments, versants ; dépôt, deltas, diffusion marine ; climat, érosion marine |
 
 ---
 

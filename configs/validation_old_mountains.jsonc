@@ -1,0 +1,17 @@
+// Validation de l'étape 3, partie 2 : montagnes vieilles. Un dôme fort qui
+// s'arrête à mi-parcours (1 Ma sur 2 Ma), avec une diffusion de versant forte.
+// Attendu : en fin de simulation, des reliefs arrondis (crêtes et sommets
+// émoussés), du sédiment au pied des pentes ("sediment").
+{
+  "seed": 5,
+  "origin": { "type": "continental" },
+  "shape": { "lobe_count": 1, "lobe_spread": 0, "radius_ratio": 0.6, "elongation": 1.0, "bay_count": 0 },
+  "initial_topography": { "mode": "peneplain", "base_elevation_m": 10, "regional_dome_m": 20 },
+  "geology": { "folding": { "enabled": false }, "fault_count": 0, "intrusion_count": 0 },
+  "tectonics": { "uplift_warp_amplitude": 0.1, "uplift_modulation": 0.3,
+                 "phases": [ { "type": "dome", "center": [0, 0], "width_m": 900,
+                               "rate_m_per_year": 1e-3, "start_years": -1e7, "end_years": 1e6 } ] },
+  "climate": { "base_precipitation_m_per_year": 1.0 },
+  "erosion": { "fluvial": { "k_base": 1e-5, "m": 0.5 }, "hillslope": { "diffusivity_m2_per_year": 0.1 } },
+  "simulation": { "coarse_resolution": 512, "total_duration_years": 2e6, "dt_years": 5000, "log_interval_steps": 40 }
+}

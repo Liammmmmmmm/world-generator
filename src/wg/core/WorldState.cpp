@@ -120,6 +120,21 @@ Grid2D<std::uint8_t>& WorldState::createByteLayer(std::string_view name, int wid
     return create(byteLayers_, name, width, length, fill, {});
 }
 
+// --- Scalars -------------------------------------------------------------------------
+
+bool WorldState::hasScalar(std::string_view name) const {
+    return scalars_.find(name) != scalars_.end();
+}
+
+double WorldState::scalar(std::string_view name, double fallback) const {
+    const auto it = scalars_.find(name);
+    return it != scalars_.end() ? it->second : fallback;
+}
+
+void WorldState::setScalar(std::string_view name, double value) {
+    scalars_[std::string(name)] = value;
+}
+
 // --- Voxels --------------------------------------------------------------------------
 
 const VoxelVolume& WorldState::voxels() const {
@@ -157,6 +172,7 @@ std::shared_ptr<const void> WorldState::layerHandle(std::string_view name) const
 WorldState WorldState::deepCopy() const {
     WorldState copy(info_);
     copy.params_ = params_; // immutable, safe to share
+    copy.scalars_ = scalars_;
     for (const auto& layer : layers_)
         copy.layers_.push_back({layer.name, std::make_shared<Grid2D<float>>(*layer.data), layer.meta});
     for (const auto& layer : byteLayers_)

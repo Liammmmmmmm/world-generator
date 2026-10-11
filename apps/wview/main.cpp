@@ -116,7 +116,7 @@ private:
                     job_->cancel();
                     retiredJobs_.push_back(std::move(job_));
                 }
-                job_ = std::make_unique<GenerationJob>(std::move(pipeline), config_, kPreviewInterval);
+                job_ = std::make_unique<GenerationJob>(std::move(pipeline), config_, kPreviewInterval, simControl_);
             } else {
                 wg::Snapshot snapshot;
                 snapshot.state = wg::readWorld(source_);
@@ -466,9 +466,31 @@ private:
         return m.x < kPanelWidth + kMargin && m.y < panelHeight_ + kMargin;
     }
 
+    // Simulation playback: SPACE pause / resume, N one step, + / - speed.
+    static constexpr double kSpeeds[] = {0.0, 100.0, 30.0, 10.0, 3.0, 1.0}; // steps per second, 0 = max
+    void handleSimulationInput() {
+        if (IsKeyPressed(KEY_SPACE))
+            simControl_->paused = !simControl_->paused;
+        for (int c = GetCharPressed(); c != 0; c = GetCharPressed()) {
+            if (c == 'n' || c == 'N') {
+                simControl_->paused = true;
+                ++simControl_->stepRequests;
+            } else if (c == '-' && speedIndex_ + 1 < static_cast<int>(std::size(kSpeeds))) {
+                simControl_->stepsPerSecond = kSpeeds[++speedIndex_];
+            } else if (c == '+' && speedIndex_ > 0) {
+                simControl_->stepsPerSecond = kSpeeds[--speedIndex_];
+            }
+        }
+    }
+
+    std::string speedLabel() const {
+        return speedIndex_ == 0 ? std::string("max") : TextFormat("%.0f steps/s", kSpeeds[speedIndex_]);
+    }
+
     void handleInput() {
         if (IsKeyPressed(KEY_R))
             reload();
+        handleSimulationInput();
         handleSectionInput();
         if (IsKeyPressed(KEY_TAB))
             mode_ = mode_ == ViewMode::Map2D ? ViewMode::Terrain3D : ViewMode::Map2D;
@@ -693,6 +715,19 @@ private:
             drawStageRow(i, x, y);
         y += 6;
 
+        // Simulated time of the selected stage (simulations publish it).
+        if (const wg::Snapshot* snapshot = currentSnapshot(); snapshot && snapshot->state.hasScalar("time_years")) {
+            const auto& state = snapshot->state;
+            const double years = state.scalar("time_years");
+            text(TextFormat("t = %s   step %d / %d", years >= 1e6 ? TextFormat("%.3f Ma", years / 1e6)
+                                                                  : TextFormat("%.1f ka", years / 1e3),
+                            static_cast<int>(state.scalar("step")), static_cast<int>(state.scalar("steps"))));
+            if (state.hasScalar("sea_level_m"))
+                text(TextFormat("sea level %+.1f m", state.scalar("sea_level_m")));
+            text(std::string(simControl_->paused ? "paused" : "running") + "   speed " + speedLabel(), kDimText);
+            y += 6;
+        }
+
         listedViews_.clear();
         layerListTop_ = 1e9f;
         if (const wg::Snapshot* snapshot = currentSnapshot()) {
@@ -717,6 +752,7 @@ private:
         text(mode_ == ViewMode::Map2D ? "2D: drag pan, wheel zoom" : "3D: left orbit, right pan, wheel", kDimText);
         text("TAB 2D/3D  R regenerate  F reset", kDimText);
         text("X section  S place  Q/E rotate", kDimText);
+        text("SPACE pause  N step  +/- speed", kDimText);
         panelHeight_ = y - kMargin + 4;
     }
 
@@ -774,8 +810,12 @@ private:
             status = jobError_;
         else {
             error = false;
-            if (job_ && !job_->finished())
+            if (job_ && !job_->finished()) {
+                const std::string log = job_->lastLog();
                 status = TextFormat("Generating... %.1f s", job_->elapsedSeconds());
+                if (!log.empty())
+                    status = log + "   |   " + status;
+            }
             else if (job_)
                 status = TextFormat("Generated in %.0f ms", job_->elapsedSeconds() * 1000.0);
         }
@@ -828,6 +868,8 @@ private:
     double lastWatchCheck_ = 0.0;
 
     std::shared_ptr<const wg::WorldConfig> config_;
+    std::shared_ptr<SimulationControl> simControl_ = std::make_shared<SimulationControl>();
+    int speedIndex_ = 0;
     std::unique_ptr<GenerationJob> job_;
     std::vector<std::unique_ptr<GenerationJob>> retiredJobs_; // cancelled, finishing in the background
     std::vector<StageSlot> slots_;
