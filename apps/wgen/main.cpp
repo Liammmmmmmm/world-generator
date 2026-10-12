@@ -128,6 +128,10 @@ int main(int argc, char** argv) {
         }
 
         wg::PipelineCallbacks callbacks;
+        callbacks.onLog = [&](std::size_t index, const std::string& message) {
+            std::printf("      [%zu] %s\n", index + 1, message.c_str());
+            std::fflush(stdout);
+        };
         callbacks.onStageDone = [&](std::size_t index, const wg::Snapshot& snapshot) {
             std::printf("  %2zu. %-16s %-12s %8.1f ms\n", index + 1, snapshot.stageName.c_str(),
                         snapshot.stageType.c_str(), snapshot.seconds * 1000.0);

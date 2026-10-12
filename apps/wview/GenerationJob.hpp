@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -33,8 +34,16 @@ public:
     GenerationJob(const GenerationJob&) = delete;
     GenerationJob& operator=(const GenerationJob&) = delete;
 
-    void cancel() { cancelled_ = true; }
+    void cancel();
     bool finished() const { return finished_; }
+
+    // Playback of iterative stages (erosion): free running (stepsPerFrame 0),
+    // a number of steps per UI frame, or paused. With a limit, the UI calls
+    // nextFrame() once per frame to let that many steps run, and a preview is
+    // taken after the last of them.
+    void setPlayback(bool paused, int stepsPerFrame);
+    void nextFrame();
+    void stepOnce(); // when paused: run a single step
 
     // Copies the current state into `slots` / `error` if it changed since the
     // last call. Returns true if it did.
@@ -57,6 +66,14 @@ private:
     std::string error_;
     std::uint64_t version_ = 1;
     std::uint64_t polledVersion_ = 0;
+
+    bool stepGate(); // PipelineCallbacks::stepGate, on the generation thread
+
+    std::mutex gateMutex_;
+    std::condition_variable gate_;
+    bool paused_ = false;
+    int stepsPerFrame_ = 0;
+    int budget_ = 0; // steps allowed until the next frame
 
     std::atomic<bool> cancelled_{false};
     std::atomic<bool> finished_{false};

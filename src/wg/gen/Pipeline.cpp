@@ -105,16 +105,35 @@ std::vector<Snapshot> Pipeline::run(const WorldConfig& config, const PipelineCal
         const auto start = Clock::now();
         auto lastPreview = start;
 
-        StageContext context{config, info, deriveSeed(info.seed, entry.name), entry.name, [&](float fraction) {
-                                 checkCancelled();
-                                 if (!callbacks.onStageProgress || secondsSince(lastPreview) < callbacks.previewInterval)
-                                     return;
-                                 lastPreview = Clock::now();
-                                 Snapshot preview{entry.name, entry.type, {}, secondsSince(start), {}, false, false};
-                                 diff(preview, state, before);
-                                 preview.state = state.deepCopy();
-                                 callbacks.onStageProgress(i, std::move(preview), std::clamp(fraction, 0.0f, 1.0f));
-                             }};
+        const auto sendPreview = [&](float fraction, int step, int total) {
+            lastPreview = Clock::now();
+            Snapshot preview{entry.name, entry.type, {}, secondsSince(start), {}, false, false, step, total};
+            diff(preview, state, before);
+            preview.state = state.deepCopy();
+            callbacks.onStageProgress(i, std::move(preview), std::clamp(fraction, 0.0f, 1.0f));
+        };
+        int lastStep = -1, lastTotal = 0;
+        StageContext context{config, info, deriveSeed(info.seed, entry.name), entry.name, {}, {}, {}};
+        context.onProgress = [&](float fraction) {
+            checkCancelled();
+            if (callbacks.onStageProgress && secondsSince(lastPreview) >= callbacks.previewInterval)
+                sendPreview(fraction, lastStep, lastTotal);
+        };
+        context.onStep = [&](int done, int total, const std::function<void()>& publish) {
+            checkCancelled();
+            lastStep = done, lastTotal = total;
+            const bool wanted = callbacks.stepGate && callbacks.stepGate();
+            checkCancelled(); // the gate may have waited for a long time
+            if (!callbacks.onStageProgress ||
+                (!wanted && done < total && secondsSince(lastPreview) < callbacks.previewInterval))
+                return;
+            publish();
+            sendPreview(total > 0 ? static_cast<float>(done) / total : 1.0f, done, total);
+        };
+        context.onLog = [&](const std::string& message) {
+            if (callbacks.onLog)
+                callbacks.onLog(i, message);
+        };
 
         try {
             entry.stage->run(state, context);
@@ -124,7 +143,7 @@ std::vector<Snapshot> Pipeline::run(const WorldConfig& config, const PipelineCal
             throw GenerationError("stage '" + entry.name + "' failed: " + e.what());
         }
 
-        Snapshot snapshot{entry.name, entry.type, state, secondsSince(start), {}, false, false};
+        Snapshot snapshot{entry.name, entry.type, state, secondsSince(start), {}, false, false, lastStep, lastTotal};
         diff(snapshot, state, before);
         if (callbacks.onStageDone)
             callbacks.onStageDone(i, snapshot);

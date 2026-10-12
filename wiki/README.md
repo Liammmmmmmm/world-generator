@@ -9,6 +9,7 @@ notice d'utilisation (build, commandes, contrôles du viewer).
 | [Vue d'ensemble](README.md) (cette page) | Architecture, flux de données, concepts transverses |
 | [Étape 1 : paramètres](etape-1-parametres.md) | Lecture de la config, tirage depuis la seed, overrides, validation |
 | [Étape 2 : initialisation de l'île](etape-2-initialisation.md) | Masque, bathymétrie, topographie, montagnes, géologie |
+| [Étape 3 : érosion](etape-3-erosion.md) | Érosion hydraulique par particules, repère normalisé, lecture pas à pas |
 
 ---
 
@@ -62,7 +63,8 @@ src/wg/                       bibliothèque "wg", sans dépendance au rendu
     StageParams    paramètres propres à une entrée du "pipeline" JSON (rarement utilisé)
     StageRegistry  "type" → fabrique d'étape, et pipeline par défaut
     Pipeline       construit et exécute les étapes, produit les snapshots, gère live/annulation
-    stages/        les étapes : ParametersStage, IslandInitStage, BuiltinStages.cpp (registre)
+    stages/        les étapes : ParametersStage, IslandInitStage, ErosionStage, PostprocessStage,
+                   BuiltinStages.cpp (registre)
   island/
     IslandLayers   noms des calques de l'île et flags de cellule (contrat entre étapes)
     IslandGrid     géométrie de la grille de simulation (taille, cellule, coordonnées)
@@ -70,6 +72,7 @@ src/wg/                       bibliothèque "wg", sans dépendance au rendu
     Relief         zones de montagnes × bruit ridged
   noise/Fbm        bruit fractal OpenSimplex2 (FastNoiseLite)
   noise/Ridged     bruit ridged multifractal (Musgrave)
+  erosion/         érosion par particules : ErosionMap (cellules), Drop (une goutte), ParticleErosion (les pas)
   render/          vues, palettes, rendu 2D (partagé par le PNG et le viewer)
   io/              format natif .wgw, export PNG
 apps/
@@ -121,7 +124,7 @@ Une étape ([Stage.hpp](../src/wg/gen/Stage.hpp)) implémente
 Le viewer utilise ces changements pour afficher par défaut ce que l'étape a produit.
 
 Le **pipeline par défaut** est défini en code dans
-[BuiltinStages.cpp](../src/wg/gen/stages/BuiltinStages.cpp) (`parameters`, `island_init`). Une
+[BuiltinStages.cpp](../src/wg/gen/stages/BuiltinStages.cpp) (`parameters`, `island_init`, `erosion`, `postprocess`). Une
 clé `"pipeline"` dans la config permet de le remplacer, par exemple pour tester une étape
 seule.
 

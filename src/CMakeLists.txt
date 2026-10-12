@@ -7,10 +7,13 @@ add_library(wg
   wg/gen/StageParams.cpp
   wg/gen/StageRegistry.cpp
   wg/gen/stages/BuiltinStages.cpp
+  wg/gen/stages/ErosionStage.cpp
   wg/gen/stages/IslandInitStage.cpp
   wg/gen/stages/ParametersStage.cpp
   wg/params/IslandParams.cpp
   wg/params/ParamResolver.cpp
+  wg/erosion/Drop.cpp
+  wg/erosion/ParticleErosion.cpp
   wg/island/Geology.cpp
   wg/island/Relief.cpp
   wg/io/PngExport.cpp

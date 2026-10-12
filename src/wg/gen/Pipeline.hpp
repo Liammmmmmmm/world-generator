@@ -36,6 +36,8 @@ struct Snapshot {
     std::vector<std::string> changedLayers; // created or modified by the stage
     bool voxelsChanged = false;
     bool paramsChanged = false;
+    int step = -1;      // iterative stage: steps done (-1: not iterative)
+    int totalSteps = 0;
 };
 
 struct StageDescription {
@@ -53,6 +55,11 @@ struct PipelineCallbacks {
     std::function<void(std::size_t index, const Snapshot& result)> onStageDone;
     // Polled between stages and on every progress report.
     std::function<bool()> shouldCancel;
+    // Called before each step of an iterative stage (StageContext::step); may
+    // block to pause it. Returns true to get a preview of this very step.
+    std::function<bool()> stepGate;
+    // Diagnostic messages of the stages.
+    std::function<void(std::size_t index, const std::string& message)> onLog;
     double previewInterval = 0.1;
 };
 

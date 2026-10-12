@@ -181,6 +181,33 @@ struct IslandParams {
         } folding;
     } geology;
 
+    // Particle-based hydraulic erosion (SimpleHydrology, Nick McDonald), in a
+    // normalized frame: a cell is 1 unit wide, heights are divided by
+    // heightScaleM and measured from sea level.
+    struct Erosion {
+        struct Particles {
+            bool enabled = true;
+            int steps = 0;
+            int particlesPerStep = 0; // 0: automatic, land cells / 512
+            int maxAge = 0;
+            double gravity = 0.0;
+            double momentumTransfer = 0.0;
+            double entrainment = 0.0;
+            double depositionRate = 0.0;
+            double evaporationRate = 0.0;
+            double minVolume = 0.0;
+            double dischargeLrate = 0.0;   // learning rate of the time-averaged maps
+            double dischargeScale = 0.0;   // discharge_norm = erf(scale * discharge)
+            double hardnessInfluence = 0.0; // exponent of the rock erodibility
+            double heightScaleM = 0.0;     // meters per normalized height unit (the cell size by default)
+        } particles;
+        struct Thermal {
+            bool enabled = true;
+            double rate = 0.0;
+            double sedimentTalusAngleDeg = 0.0;
+        } thermal;
+    } erosion;
+
     // Not used yet: will weight the rain and drive the dunes.
     struct Climate {
         double humidity = 0.0;

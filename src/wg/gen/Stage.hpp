@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <string_view>
 
 #include "wg/core/WorldInfo.hpp"
@@ -27,7 +28,26 @@ struct StageContext {
             onProgress(fraction);
     }
 
+    // For iterative stages (erosion), once per step, after step `done` of
+    // `total`: reports progress, and lets an observer pause the stage between
+    // steps or follow it step by step. `publish` writes the stage's internal
+    // state into the world layers; it is only called when a preview is taken.
+    void step(int done, int total, const std::function<void()>& publish) const {
+        if (onStep)
+            onStep(done, total, publish);
+        else
+            progress(total > 0 ? static_cast<float>(done) / total : 1.0f);
+    }
+
+    // Diagnostic message (shown by wgen).
+    void log(const std::string& message) const {
+        if (onLog)
+            onLog(message);
+    }
+
     std::function<void(float)> onProgress;
+    std::function<void(int, int, const std::function<void()>&)> onStep;
+    std::function<void(const std::string&)> onLog;
 };
 
 // One step of the generation pipeline (noise, erosion, voxelization, caves...).

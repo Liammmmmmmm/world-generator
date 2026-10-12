@@ -58,6 +58,8 @@ annule la génération en cours et en relance une.
 | `TAB`                   | Vue 2D (carte) / 3D                                             |
 | `R` / `F`               | Régénérer / recadrer la caméra                                  |
 | `X`                     | Coupe verticale de la roche (panneau en bas)                    |
+| `Espace` / `N`          | Érosion : lecture / pause, un pas pendant la pause              |
+| `+` / `-`               | Érosion : pas par frame (1 à 64, ou vitesse max)                |
 | `S` / `Q` `E` / molette | Coupe : placer son centre sous la souris / la tourner / exagération verticale |
 | 2D                      | Glisser : déplacer, molette : zoom, survol : valeur sous la souris |
 | 3D                      | Clic gauche : orbite, clic droit : déplacer, molette : zoom     |
@@ -129,6 +131,8 @@ l'étape) et les paramètres propres à l'étape.
 |---------------|-----------------------------------------------------------------------------------------------|
 | `parameters`  | Étape 1 : publie les paramètres résolus dans l'état du monde (`world.params()`)                |
 | `island_init` | Étape 2 : état initial de l'île sur la grille de simulation, sans érosion (voir ci-dessous)    |
+| `erosion`     | Étape 3 : érosion hydraulique par particules ([wiki](wiki/etape-3-erosion.md))                 |
+| `postprocess` | Étape 4 : vide pour l'instant (lacs, rivières, falaises côtières à venir)                      |
 
 #### `island_init`
 

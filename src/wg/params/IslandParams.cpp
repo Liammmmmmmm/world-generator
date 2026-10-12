@@ -469,7 +469,41 @@ void resolveGeology(ParamResolver& r, IslandParams::Geology& g, const IslandPara
     f.plungeDeg = r.uniform("geology.folding.plunge_deg", 0, 20);
 }
 
+// Erosion defaults follow SimpleHydrology; see island_params.jsonc.
+void resolveErosion(ParamResolver& r, IslandParams& p) {
+    auto& e = p.erosion.particles;
+    e.enabled = r.flag("erosion.particles.enabled", true);
+    e.steps = r.whole("erosion.particles.steps", 1000);
+    e.particlesPerStep = r.whole("erosion.particles.particles_per_step", 0);
+    e.maxAge = r.whole("erosion.particles.max_age", 512);
+    e.gravity = r.number("erosion.particles.gravity", 1.0);
+    e.momentumTransfer = r.number("erosion.particles.momentum_transfer", 1.0);
+    e.entrainment = r.number("erosion.particles.entrainment", 10.0);
+    e.depositionRate = r.number("erosion.particles.deposition_rate", 0.1);
+    e.evaporationRate = r.number("erosion.particles.evaporation_rate", 0.001);
+    e.minVolume = r.number("erosion.particles.min_volume", 0.01);
+    e.dischargeLrate = r.number("erosion.particles.discharge_lrate", 0.1);
+    e.dischargeScale = r.number("erosion.particles.discharge_scale", 0.4);
+    e.hardnessInfluence = r.number("erosion.particles.hardness_influence", 1.0);
+    // Default: the cell size, i.e. the true geometry (no vertical exaggeration).
+    const double cellM = p.world.width * p.world.blockSizeM / p.simulation.resolution;
+    e.heightScaleM = r.number("erosion.particles.height_scale_m", cellM);
+    if (e.steps < 0 || e.particlesPerStep < 0 || e.maxAge < 1 || e.gravity <= 0.0 || e.depositionRate < 0.0 ||
+        e.depositionRate > 1.0 || e.evaporationRate < 0.0 || e.evaporationRate >= 1.0 || e.minVolume <= 0.0 ||
+        e.dischargeLrate <= 0.0 || e.dischargeLrate > 1.0 || e.dischargeScale <= 0.0 || e.heightScaleM <= 0.0)
+        throw ConfigError("'erosion.particles': steps, particles_per_step >= 0, max_age >= 1, gravity, min_volume, "
+                          "discharge_scale, height_scale_m > 0, deposition_rate and discharge_lrate in (0, 1], "
+                          "evaporation_rate in [0, 1)");
 
+    auto& t = p.erosion.thermal;
+    t.enabled = r.flag("erosion.thermal.enabled", true);
+    t.rate = r.uniform("erosion.thermal.rate", 0.6, 1.0);
+    t.sedimentTalusAngleDeg = r.number("erosion.thermal.sediment_talus_angle_deg", 33);
+    if (t.rate < 0.0 || t.rate > 1.0 || t.sedimentTalusAngleDeg <= 0.0 || t.sedimentTalusAngleDeg >= 90.0)
+        throw ConfigError("'erosion.thermal': rate in [0, 1], sediment_talus_angle_deg in (0, 90)");
+}
+
+// Not used yet: will weight the rain and drive the dunes.
 void resolveClimate(ParamResolver& r, IslandParams::Climate& c) {
     c.humidity = r.uniform("climate.humidity", 0, 1);
     c.wind.directionDeg = r.uniform("climate.wind.direction_deg", 0, 360);
@@ -479,7 +513,7 @@ void resolveClimate(ParamResolver& r, IslandParams::Climate& c) {
 
 // Top-level order of the resolved JSON (matches island_params.jsonc).
 constexpr std::array kSectionOrder{
-    "seed", "world", "simulation", "origin", "shape", "initial_topography", "relief", "geology", "climate",
+    "seed", "world", "simulation", "origin", "shape", "initial_topography", "relief", "geology", "erosion", "climate",
 };
 
 } // namespace
@@ -505,6 +539,7 @@ ResolvedParams resolveIslandParams(std::uint64_t seed, const nlohmann::json& con
     resolveInitialTopography(r, p);
     resolveRelief(r, p);
     resolveGeology(r, p.geology, p.origin, p.islandRadiusM(), p.shape.mainAxisDeg);
+    resolveErosion(r, p);
     resolveClimate(r, p.climate);
     r.checkNoUnknownKeys();
 

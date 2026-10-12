@@ -10,6 +10,7 @@ GenerationJob::GenerationJob(wg::Pipeline pipeline, std::shared_ptr<const wg::Wo
         wg::PipelineCallbacks callbacks;
         callbacks.previewInterval = previewInterval_;
         callbacks.shouldCancel = [this] { return cancelled_.load(); };
+        callbacks.stepGate = [this] { return stepGate(); };
         callbacks.onStageStart = [this](std::size_t i) { update(i, StageStatus::Running, 0.0f, std::nullopt); };
         callbacks.onStageProgress = [this](std::size_t i, wg::Snapshot preview, float progress) {
             update(i, StageStatus::Running, progress, std::move(preview));
@@ -32,6 +33,52 @@ GenerationJob::GenerationJob(wg::Pipeline pipeline, std::shared_ptr<const wg::Wo
         endSeconds_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_).count();
         finished_ = true;
     });
+}
+
+void GenerationJob::cancel() {
+    {
+        const std::lock_guard lock(gateMutex_);
+        cancelled_ = true;
+    }
+    gate_.notify_all();
+}
+
+void GenerationJob::setPlayback(bool paused, int stepsPerFrame) {
+    {
+        const std::lock_guard lock(gateMutex_);
+        paused_ = paused;
+        stepsPerFrame_ = stepsPerFrame;
+        budget_ = 0;
+    }
+    gate_.notify_all();
+}
+
+void GenerationJob::nextFrame() {
+    {
+        const std::lock_guard lock(gateMutex_);
+        if (paused_ || stepsPerFrame_ == 0)
+            return;
+        budget_ = stepsPerFrame_; // not accumulated: a slow frame does not queue steps
+    }
+    gate_.notify_all();
+}
+
+void GenerationJob::stepOnce() {
+    {
+        const std::lock_guard lock(gateMutex_);
+        if (!paused_)
+            return;
+        budget_ = 1;
+    }
+    gate_.notify_all();
+}
+
+bool GenerationJob::stepGate() {
+    std::unique_lock lock(gateMutex_);
+    gate_.wait(lock, [this] { return cancelled_ || (!paused_ && stepsPerFrame_ == 0) || budget_ > 0; });
+    if (cancelled_ || budget_ == 0)
+        return false; // free running: previews at the usual interval
+    return --budget_ == 0; // a preview after the last step of the frame
 }
 
 GenerationJob::~GenerationJob() {

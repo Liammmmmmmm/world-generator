@@ -166,6 +166,33 @@
     }
   },
 
+  // Érosion hydraulique par particules (SimpleHydrology de Nick McDonald, version 2023, et soillib).
+  // Repère normalisé : une cellule mesure 1 unité, les hauteurs sont en height_scale_m depuis le niveau de la mer.
+  // Valeurs par défaut fixes (non tirées), toutes forçables.
+  "erosion": {
+    "particles": {
+      "enabled": true,
+      "steps": 1000,                   // pas d'érosion ; à chaque pas, des gouttes naissent et descendent jusqu'à leur mort
+      "particles_per_step": null,      // null ou 0 : une goutte pour 512 cellules de terre (densité de SimpleHydrology)
+      "max_age": 512,                  // itérations au plus par goutte ; à sa mort, elle dépose ce qu'elle porte
+      "gravity": 1.0,                  // poids de la pente dans la vitesse (soillib : 2)
+      "momentum_transfer": 1.0,        // entraînement des gouttes par le courant (méandres) ; jalon C
+      "entrainment": 10.0,             // sédiment transportable en plus par unité de débit normalisé
+      "deposition_rate": 0.1,          // part de l'écart à l'équilibre échangée à chaque itération (0, 1]
+      "evaporation_rate": 0.001,       // perte de volume par itération [0, 1)
+      "min_volume": 0.01,              // la goutte meurt en dessous
+      "discharge_lrate": 0.1,          // taux d'apprentissage des cartes moyennées (débit, élan) (0, 1]
+      "discharge_scale": 0.4,          // discharge_norm = erf(discharge_scale * débit)
+      "hardness_influence": 1.0,       // exposant de l'érodabilité de la roche ; jalon B
+      "height_scale_m": null           // mètres par unité de hauteur ; null = taille d'une cellule (géométrie vraie)
+    },
+    "thermal": {                       // avalanche : jalon B
+      "enabled": true,
+      "rate": null,                    // part de l'excès de pente déplacée [0.6, 1]
+      "sediment_talus_angle_deg": 33   // angle de talus des sédiments meubles
+    }
+  },
+
   // Non utilisé pour l'instant : servira à pondérer la pluie et aux dunes.
   "climate": {
     "humidity": null,                  // [0,1]

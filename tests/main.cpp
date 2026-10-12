@@ -297,9 +297,12 @@ void testLiveCallbacks() {
 
 // --- Island initialization ---------------------------------------------------------
 
+// Parameters and island initialization only (unless the config has a pipeline).
 std::vector<wg::Snapshot> runIsland(nlohmann::json config) {
+    if (!config.contains("pipeline"))
+        config["pipeline"] = {{{"type", "parameters"}}, {{"type", "island_init"}}};
     const auto loaded = wg::WorldConfig::fromJson(config);
-    return wg::Pipeline::fromConfig(loaded).run(loaded); // default pipeline
+    return wg::Pipeline::fromConfig(loaded).run(loaded);
 }
 
 void testIslandInit() {
@@ -643,6 +646,66 @@ void testGeologyFolds() {
     CHECK(name(geology.material(0, -100, 45)) == "limestone"); // trough: depth 5
 }
 
+// Particle erosion on a small volcanic island (only a few steps).
+std::vector<wg::Snapshot> runErosion(nlohmann::json particles, const wg::PipelineCallbacks& callbacks = {}) {
+    particles["steps"] = particles.value("steps", 30);
+    const auto loaded = wg::WorldConfig::fromJson({{"seed", 2},
+                                                   {"world", {{"width", 1024}, {"length", 1024}}},
+                                                   {"simulation", {{"resolution", 256}}},
+                                                   {"origin", {{"type", "volcanic"}}},
+                                                   {"erosion", {{"particles", particles}}}});
+    return wg::Pipeline::fromConfig(loaded).run(loaded, callbacks);
+}
+
+void testErosion() {
+    std::vector<std::string> logs;
+    wg::PipelineCallbacks callbacks;
+    callbacks.onLog = [&](std::size_t, const std::string& message) { logs.push_back(message); };
+    const auto snapshots = runErosion(nlohmann::json::object(), callbacks);
+    CHECK(snapshots.size() == 4 && snapshots[2].stageName == "erosion" && snapshots[3].stageName == "postprocess");
+    const auto& state = snapshots[2].state;
+    CHECK(snapshots[2].step == 30 && snapshots[2].totalSteps == 30);
+
+    // Something was eroded and deposited, every height is finite.
+    const auto [erodedMin, erodedMax] = wg::valueRange(state.layer(wg::layers::kEroded));
+    CHECK(erodedMax > 0.1f && erodedMin < -0.1f);
+    const auto [dMin, dMax] = wg::valueRange(state.layer(wg::layers::kDischargeNorm));
+    CHECK(dMin >= 0.0f && dMax > 0.05f && dMax <= 1.0f); // erf rounds to 1 in float for strong flows
+    CHECK(std::all_of(state.layer(wg::layers::kHeight).data().begin(), state.layer(wg::layers::kHeight).data().end(),
+                      [](float h) { return std::isfinite(h); }));
+    // FIXED border untouched.
+    CHECK(state.layer(wg::layers::kHeight).at(0, 7) == snapshots[1].state.layer(wg::layers::kHeight).at(0, 7));
+
+    // Mass balance, logged: Σ h + sediment out of the domain is conserved.
+    double drift = 1.0;
+    std::sscanf(logs.back().c_str(), "step %*d: %*f ms/step, sediment out %*f, mass drift %*g (%lg", &drift);
+    CHECK(std::abs(drift) < 1e-7);
+
+    // Deterministic.
+    const auto again = runErosion(nlohmann::json::object());
+    const auto a = state.layer(wg::layers::kHeight).data(), b = again[2].state.layer(wg::layers::kHeight).data();
+    CHECK(std::equal(a.begin(), a.end(), b.begin(), b.end()));
+
+    // Disabled: heights unchanged.
+    const auto off = runErosion({{"enabled", false}});
+    const auto c = off[2].state.layer(wg::layers::kHeight).data(), d = off[1].state.layer(wg::layers::kHeight).data();
+    CHECK(std::equal(c.begin(), c.end(), d.begin(), d.end()));
+}
+
+void testStepGate() {
+    // A gate asking for every step gets one preview per step, in order.
+    std::vector<int> steps;
+    wg::PipelineCallbacks callbacks;
+    callbacks.previewInterval = 1e9; // no time-based preview
+    callbacks.stepGate = [] { return true; };
+    callbacks.onStageProgress = [&](std::size_t, wg::Snapshot preview, float) {
+        if (preview.stageName == "erosion")
+            steps.push_back(preview.step);
+    };
+    runErosion({{"steps", 5}}, callbacks);
+    CHECK((steps == std::vector<int>{1, 2, 3, 4, 5}));
+}
+
 void testVoxelVolume() {
     wg::VoxelVolume a(20, 20, -8, 30);
     a.fillBox(0, -8, 0, 20, 8, 20, wg::Block::Stone); // fully covers the first section layer
@@ -717,6 +780,8 @@ int main() {
     testTopographyByOrigin();
     testGeology();
     testGeologyFolds();
+    testErosion();
+    testStepGate();
     testVoxelVolume();
     testWorldFileRoundTrip();
     testDeterminism();

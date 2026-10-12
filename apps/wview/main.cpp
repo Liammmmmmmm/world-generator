@@ -55,6 +55,11 @@ constexpr int kMargin = 8;
 // How often a running stage sends a live preview (each one is re-rendered).
 constexpr double kPreviewInterval = 0.1;
 
+// Playback speeds of iterative stages (erosion), in steps per frame; 0 = as
+// fast as possible.
+constexpr int kSpeeds[] = {1, 2, 4, 8, 16, 32, 64, 0};
+constexpr int kSpeedCount = static_cast<int>(sizeof kSpeeds / sizeof kSpeeds[0]);
+
 // UI font, loaded in main() (raylib's default bitmap font if the file is missing).
 Font gFont{};
 
@@ -84,6 +89,8 @@ public:
     void run() {
         reload();
         while (!WindowShouldClose()) {
+            if (job_)
+                job_->nextFrame();
             syncJob();
             handleInput();
             watchSource();
@@ -117,6 +124,7 @@ private:
                     retiredJobs_.push_back(std::move(job_));
                 }
                 job_ = std::make_unique<GenerationJob>(std::move(pipeline), config_, kPreviewInterval);
+                job_->setPlayback(paused_, kSpeeds[speed_]);
             } else {
                 wg::Snapshot snapshot;
                 snapshot.state = wg::readWorld(source_);
@@ -469,6 +477,7 @@ private:
     void handleInput() {
         if (IsKeyPressed(KEY_R))
             reload();
+        handlePlaybackInput();
         handleSectionInput();
         if (IsKeyPressed(KEY_TAB))
             mode_ = mode_ == ViewMode::Map2D ? ViewMode::Terrain3D : ViewMode::Map2D;
@@ -739,6 +748,27 @@ private:
         y += kLine;
     }
 
+    // Space: play / pause, N: one step while paused, + / -: steps per frame.
+    void handlePlaybackInput() {
+        bool changed = false;
+        if (IsKeyPressed(KEY_SPACE))
+            paused_ = !paused_, changed = true;
+        if (IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD))
+            speed_ = std::min(speed_ + 1, kSpeedCount - 1), changed = true;
+        if (IsKeyPressed(KEY_MINUS) || IsKeyPressed(KEY_KP_SUBTRACT))
+            speed_ = std::max(speed_ - 1, 0), changed = true;
+        if (changed && job_)
+            job_->setPlayback(paused_, kSpeeds[speed_]);
+        if (IsKeyPressed(KEY_N) && job_)
+            job_->stepOnce();
+    }
+
+    std::string playbackText() const {
+        if (paused_)
+            return "paused (space: play, N: step)";
+        return kSpeeds[speed_] == 0 ? "playing, max speed" : TextFormat("playing, %d steps/frame", kSpeeds[speed_]);
+    }
+
     void drawStageRow(int i, int x, int& y) {
         const StageSlot& slot = slots_[i];
         const int right = kMargin + kPanelWidth - 12;
@@ -750,7 +780,9 @@ private:
         switch (slot.status) {
         case StageStatus::Pending: color = kPendingText; break;
         case StageStatus::Running:
-            detail = TextFormat("%d%%", static_cast<int>(slot.progress * 100.0f));
+            detail = slot.snapshot && slot.snapshot->step >= 0
+                         ? TextFormat("step %d/%d", slot.snapshot->step, slot.snapshot->totalSteps)
+                         : TextFormat("%d%%", static_cast<int>(slot.progress * 100.0f));
             DrawRectangle(kMargin + 4, y + kLine - 5, static_cast<int>((kPanelWidth - 8) * slot.progress), 3, kProgress);
             break;
         case StageStatus::Done: detail = TextFormat("%.0f ms", slot.snapshot->seconds * 1000.0); break;
@@ -775,7 +807,7 @@ private:
         else {
             error = false;
             if (job_ && !job_->finished())
-                status = TextFormat("Generating... %.1f s", job_->elapsedSeconds());
+                status = std::string(TextFormat("Generating... %.1f s   ", job_->elapsedSeconds())) + playbackText();
             else if (job_)
                 status = TextFormat("Generated in %.0f ms", job_->elapsedSeconds() * 1000.0);
         }
@@ -838,6 +870,8 @@ private:
     int selected_ = 0;
     bool following_ = true; // selection tracks the running stage
     bool wantDefaultView_ = true;
+    bool paused_ = false; // playback of iterative stages, kept across reloads
+    int speed_ = kSpeedCount - 1;
     wg::View view_;
     wg::ColorMap colorMap_ = wg::ColorMap::Auto;
 
