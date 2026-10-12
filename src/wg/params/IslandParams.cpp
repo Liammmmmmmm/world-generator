@@ -360,6 +360,68 @@ void resolveInitialTopography(ParamResolver& r, IslandParams& p) {
         throw ConfigError("'initial_topography.volcano' and 'initial_topography.atoll' sizes must be positive");
 }
 
+// Relief zones by origin: continental islands get 1 to 3 zones, with a range
+// about 60 % of the time (the first range follows the main axis); volcanic
+// islands at most low hills (the cone makes the relief); sedimentary and
+// coral islands none. Sizes are relative to the island radius, heights to
+// the zone width (bounded slopes).
+void resolveRelief(ParamResolver& r, IslandParams& p) {
+    auto& rel = p.relief;
+    const std::string& origin = p.origin.type;
+    const double R = p.islandRadiusM();
+    const double axis = p.shape.mainAxisDeg * std::numbers::pi / 180.0;
+    const double elongation = p.shape.elongation;
+
+    const auto [minCount, maxCount] = perOrigin<std::pair<int, int>>(origin, {{{0, 1}, {1, 3}, {0, 0}, {0, 0}}});
+    const int count = r.listSize("relief.zones", "relief.zone_count", minCount, maxCount);
+    bool rangeSeen = false;
+    for (int i = 0; i < count; ++i) {
+        const std::string list = "relief.zones";
+        IslandParams::ReliefZone z;
+        const Weights types = origin != "continental" ? Weights{{"hills", 1.0}}
+                              : i == 0               ? Weights{{"range", 0.6}, {"massif", 0.25}, {"hills", 0.15}}
+                                                     : Weights{{"range", 0.15}, {"massif", 0.45}, {"hills", 0.4}};
+        z.type = r.pick(at(list, i, "type"), types, {"range", "massif", "hills"});
+        const bool range = z.type == "range", hills = z.type == "hills";
+        // Center in the island frame (u along the main axis, v across it,
+        // compressed like the island), then in the world.
+        const double reachU = range ? 0.3 : 0.5, reachV = (range ? 0.25 : 0.4) / elongation;
+        z.center = r.point(at(list, i, "center"), [&](double a, double b) {
+            const double u = R * reachU * (2.0 * a - 1.0), v = R * reachV * (2.0 * b - 1.0);
+            return IslandParams::Vec2{u * std::cos(axis) - v * std::sin(axis), u * std::sin(axis) + v * std::cos(axis)};
+        });
+        const bool mainRange = range && !rangeSeen;
+        rangeSeen = rangeSeen || range;
+        z.angleDeg = r.sample(at(list, i, "angle_deg"), [&](double u) { return mainRange ? p.shape.mainAxisDeg : 180.0 * u; });
+        z.widthM = r.sample(at(list, i, "width_m"), [&](double u) {
+            return R * (range ? lerp(0.2, 0.45, u) : hills ? lerp(0.5, 1.0, u) : lerp(0.3, 0.6, u));
+        });
+        z.lengthM = r.sample(at(list, i, "length_m"), [&](double u) {
+            return range ? R * lerp(0.8, 1.6, u) : z.widthM * (hills ? lerp(1.0, 2.0, u) : lerp(1.0, 1.5, u));
+        });
+        z.heightM = r.sample(at(list, i, "height_m"), [&](double u) {
+            if (hills) // volcanic hills are weaker still
+                return z.widthM * (origin == "volcanic" ? lerp(0.02, 0.06, u) : lerp(0.04, 0.12, u));
+            return z.widthM * (range ? lerp(0.5, 1.1, u) : lerp(0.4, 0.9, u));
+        });
+        if (z.widthM <= 0.0 || z.lengthM <= 0.0 || z.heightM < 0.0)
+            throw ConfigError("'" + at(list, i, "") + "': width and length must be > 0, height >= 0");
+        rel.zones.push_back(z);
+    }
+    rel.warpAmplitude = r.uniform("relief.warp_amplitude", 0.1, 0.3);
+    rel.modulation = r.uniform("relief.modulation", 0.0, 0.6);
+
+    auto& n = rel.mountainNoise;
+    n.frequency = r.logUniform("relief.mountain_noise.frequency", 1.5, 4.0);
+    n.octaves = r.integer("relief.mountain_noise.octaves", 4, 7);
+    n.lacunarity = r.uniform("relief.mountain_noise.lacunarity", 1.9, 2.2);
+    n.gain = r.uniform("relief.mountain_noise.gain", 0.4, 0.6);
+    n.anisotropy = r.uniform("relief.mountain_noise.anisotropy", 2.0, 4.0);
+    n.warpAmplitude = r.uniform("relief.mountain_noise.warp_amplitude", 0.1, 0.35);
+    if (n.frequency <= 0.0 || n.octaves < 1 || n.anisotropy < 1.0 || rel.warpAmplitude < 0.0 || rel.modulation < 0.0)
+        throw ConfigError("'relief': frequency must be > 0, octaves >= 1, anisotropy >= 1, amplitudes >= 0");
+}
+
 void resolveGeology(ParamResolver& r, IslandParams::Geology& g, const IslandParams::Origin& origin, double radius,
                     double mainAxisDeg) {
     g.materials = parseMaterials(r.object("geology.materials", kDefaultMaterials));
@@ -417,7 +479,7 @@ void resolveClimate(ParamResolver& r, IslandParams::Climate& c) {
 
 // Top-level order of the resolved JSON (matches island_params.jsonc).
 constexpr std::array kSectionOrder{
-    "seed", "world", "simulation", "origin", "shape", "initial_topography", "geology", "climate",
+    "seed", "world", "simulation", "origin", "shape", "initial_topography", "relief", "geology", "climate",
 };
 
 } // namespace
@@ -441,6 +503,7 @@ ResolvedParams resolveIslandParams(std::uint64_t seed, const nlohmann::json& con
     resolveSimulation(r, p.simulation);
     resolveBathymetry(r, p);
     resolveInitialTopography(r, p);
+    resolveRelief(r, p);
     resolveGeology(r, p.geology, p.origin, p.islandRadiusM(), p.shape.mainAxisDeg);
     resolveClimate(r, p.climate);
     r.checkNoUnknownKeys();

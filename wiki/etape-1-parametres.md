@@ -82,7 +82,7 @@ Les fonctions disponibles :
 | `chance(path, p)` | booléen, vrai avec probabilité `p` |
 | `pick(path, poids, autorisés)` | choix pondéré ; l'override peut prendre toute valeur de `autorisés` |
 | `sample(path, f)` / `sampleInteger` | loi quelconque : `f(u)` transforme l'uniforme `u` |
-| `point(path, …)` | point [x, y] dans un rectangle (2 tirages du même flux) |
+| `point(path, f)` | point [x, y] : `f(u0, u1)` transforme deux uniformes du même flux |
 
 Les **paramètres sans aléatoire** (`world.width`, `simulation.resolution`…) passent par
 `number`, `whole`, `flag`, `object` : la valeur de la config, ou un défaut fixe
@@ -109,6 +109,7 @@ Les principales dépendances :
 |-----------|-----------|
 | `initial_topography.volcano.caldera` | `origin.age` (vieux = caldeira plus probable) |
 | `initial_topography.mode`, `base_elevation_m` | `origin.type` |
+| `relief.zones` (nombre, types, tailles), `relief.zones[0].angle_deg` | `origin.type`, rayon `R`, `shape.main_axis_deg` (1re `range`) |
 | `geology.strata[i].material`, `basement_material`, `strata_top_m`, `folding.enabled` | `origin.type` |
 | tailles du relief (volcans, plis...) | rayon de l'île `R` |
 | `shape.lobe_radius_max` | `lobe_radius_min` |
@@ -119,11 +120,11 @@ Les principales dépendances :
 | `initial_topography.volcano.crater_depth_m`, `min_spacing_m` | `height_m`, `radius_m` |
 
 L'ordre d'appel dans `resolveIslandParams` suit ces dépendances : world, origin, shape,
-simulation, bathymétrie, topographie, géologie, climat.
+simulation, bathymétrie, topographie, relief, géologie, climat.
 
 ### 3.4 Listes
 
-Les listes (aujourd'hui `geology.strata`) passent par `listSize(liste, compteur, min, max)` :
+Les listes (`geology.strata`, `relief.zones`) passent par `listSize(liste, compteur, min, max)` :
 
 | Dans la config | Nombre d'éléments |
 |----------------|-------------------|

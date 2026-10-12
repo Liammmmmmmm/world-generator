@@ -13,6 +13,7 @@ inline constexpr std::string_view kHeightInitial = "h_initial";  // h at the end
 inline constexpr std::string_view kMask = "mask";                // land mask, [0, 1]
 inline constexpr std::string_view kCoastDist = "coast_dist";     // signed distance to the coast (m), > 0 on land
 inline constexpr std::string_view kLagoon = "lagoon";            // 1 inside an atoll lagoon, else 0
+inline constexpr std::string_view kRelief = "relief";            // height added by the relief zones (m)
 inline constexpr std::string_view kSurfaceMaterial = "surface_material"; // material id at the surface
 inline constexpr std::string_view kFoldOffset = "fold_offset"; // vertical displacement of the strata by folds (m)
 inline constexpr std::string_view kFlags = "flags";              // byte layer of CellFlags

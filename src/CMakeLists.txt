@@ -12,6 +12,7 @@ add_library(wg
   wg/params/IslandParams.cpp
   wg/params/ParamResolver.cpp
   wg/island/Geology.cpp
+  wg/island/Relief.cpp
   wg/io/PngExport.cpp
   wg/io/WorldFile.cpp
   wg/render/CrossSection.cpp

@@ -517,6 +517,62 @@ void testTopographyByOrigin() {
     }
 }
 
+void testReliefByOrigin() {
+    int withRange = 0;
+    for (int seed = 1; seed <= 20; ++seed) {
+        for (const char* origin : {"sedimentary", "coral"})
+            CHECK(wg::WorldConfig::fromJson({{"seed", seed}, {"origin", {{"type", origin}}}}).island().relief.zones.empty());
+        const auto volcanic = wg::WorldConfig::fromJson({{"seed", seed}, {"origin", {{"type", "volcanic"}}}}).island();
+        CHECK(volcanic.relief.zones.size() <= 1);
+        for (const auto& z : volcanic.relief.zones)
+            CHECK(z.type == "hills");
+        const auto p = wg::WorldConfig::fromJson({{"seed", seed}, {"origin", {{"type", "continental"}}}}).island();
+        CHECK(!p.relief.zones.empty() && p.relief.zones.size() <= 3);
+        const auto range = std::find_if(p.relief.zones.begin(), p.relief.zones.end(),
+                                        [](const auto& z) { return z.type == "range"; });
+        if (range != p.relief.zones.end()) {
+            ++withRange;
+            CHECK(range->angleDeg == p.shape.mainAxisDeg); // the first range follows the main axis
+        }
+    }
+    CHECK(withRange >= 8 && withRange <= 18); // about 60 %
+}
+
+void testReliefZones() {
+    using J = nlohmann::json;
+    // One range along x on a big round island: the relief is longer than wide,
+    // and absent at sea.
+    const auto state = runIsland({{"seed", 3},
+                                  {"world", {{"width", 2048}, {"length", 2048}}},
+                                  {"simulation", {{"resolution", 256}}},
+                                  {"origin", {{"type", "continental"}}},
+                                  {"shape", {{"lobe_count", 1}, {"lobe_spread", 0.0}, {"radius_ratio", 0.8},
+                                             {"elongation", 1.0}, {"bay_count", 0}}},
+                                  {"relief", {{"modulation", 0.0},
+                                              {"zones", J::array({{{"type", "range"}, {"center", {0, 0}},
+                                                                   {"angle_deg", 0}, {"length_m", 1200},
+                                                                   {"width_m", 300}, {"height_m", 300}}})}}}})[1]
+                           .state;
+    const auto& relief = state.layer(wg::layers::kRelief);
+    const auto& mask = state.layer(wg::layers::kMask);
+    const wg::IslandGrid grid(state.params().values);
+    double along = 0.0, across = 0.0;
+    bool dryAtSea = true;
+    for (int j = 0; j < grid.ny; ++j) {
+        for (int i = 0; i < grid.nx; ++i) {
+            const double x = grid.x(i), y = grid.y(j);
+            if (std::abs(y) < 50 && std::abs(x) > 300 && std::abs(x) < 400)
+                along += relief.at(i, j);
+            if (std::abs(x) < 50 && std::abs(y) > 300 && std::abs(y) < 400)
+                across += relief.at(i, j);
+            dryAtSea = dryAtSea && (mask.at(i, j) > 0.0f || relief.at(i, j) == 0.0f);
+        }
+    }
+    CHECK(along > 3.0 * across && dryAtSea);
+    const auto [min, max] = wg::valueRange(relief);
+    CHECK(min >= 0.0f && max > 50.0f && max <= 300.0f);
+}
+
 void testSharedAxis() {
     const auto p = wg::WorldConfig::fromJson({{"seed", 4}, {"origin", {{"type", "continental"}}}}).island();
     CHECK(p.geology.folding.axisAngleDeg == p.shape.mainAxisDeg);
@@ -655,6 +711,8 @@ int main() {
     testIslandFitsInMap();
     testShapeByOrigin();
     testSharedAxis();
+    testReliefByOrigin();
+    testReliefZones();
     testAtoll();
     testTopographyByOrigin();
     testGeology();

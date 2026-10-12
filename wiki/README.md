@@ -8,7 +8,7 @@ notice d'utilisation (build, commandes, contrôles du viewer).
 |------|---------|
 | [Vue d'ensemble](README.md) (cette page) | Architecture, flux de données, concepts transverses |
 | [Étape 1 : paramètres](etape-1-parametres.md) | Lecture de la config, tirage depuis la seed, overrides, validation |
-| [Étape 2 : initialisation de l'île](etape-2-initialisation.md) | Masque, bathymétrie, topographie, géologie |
+| [Étape 2 : initialisation de l'île](etape-2-initialisation.md) | Masque, bathymétrie, topographie, montagnes, géologie |
 
 ---
 
@@ -67,7 +67,9 @@ src/wg/                       bibliothèque "wg", sans dépendance au rendu
     IslandLayers   noms des calques de l'île et flags de cellule (contrat entre étapes)
     IslandGrid     géométrie de la grille de simulation (taille, cellule, coordonnées)
     Geology        strates et plis → material(x, y, z)
+    Relief         zones de montagnes × bruit ridged
   noise/Fbm        bruit fractal OpenSimplex2 (FastNoiseLite)
+  noise/Ridged     bruit ridged multifractal (Musgrave)
   render/          vues, palettes, rendu 2D (partagé par le PNG et le viewer)
   io/              format natif .wgw, export PNG
 apps/

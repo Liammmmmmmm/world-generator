@@ -174,8 +174,9 @@ std::string ParamResolver::pick(const std::string& path, const Weights& weights,
     return drawn;
 }
 
-IslandParams::Vec2 ParamResolver::point(const std::string& path, double minX, double maxX, double minY, double maxY) {
-    IslandParams::Vec2 drawn{minX + (maxX - minX) * unit(path, 0), minY + (maxY - minY) * unit(path, 1)};
+IslandParams::Vec2 ParamResolver::point(const std::string& path,
+                                        const std::function<IslandParams::Vec2(double, double)>& f) {
+    IslandParams::Vec2 drawn = f(unit(path, 0), unit(path, 1)); // always drawn, even when overridden
     if (const nlohmann::json* value = configValue(path)) {
         if (!value->is_array() || value->size() != 2 || !(*value)[0].is_number() || !(*value)[1].is_number())
             throw typeError(path, "an [x, y] array or null");

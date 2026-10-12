@@ -10,6 +10,7 @@
 #include "wg/island/Geology.hpp"
 #include "wg/island/IslandGrid.hpp"
 #include "wg/island/IslandLayers.hpp"
+#include "wg/island/Relief.hpp"
 #include "wg/noise/Fbm.hpp"
 
 namespace wg {
@@ -243,6 +244,7 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
     Grid2D<float>& mask = world.createLayer(layers::kMask, grid.nx, grid.ny, 0.0f, {LayerStyle::Scalar, {}});
     Grid2D<float>& coastDist = world.createLayer(layers::kCoastDist, grid.nx, grid.ny, 0.0f, {LayerStyle::Diverging, {}});
     Grid2D<float>& lagoon = world.createLayer(layers::kLagoon, grid.nx, grid.ny, 0.0f, {LayerStyle::Scalar, {}});
+    Grid2D<float>& relief = world.createLayer(layers::kRelief, grid.nx, grid.ny, 0.0f, {LayerStyle::Scalar, {}});
     const Geology geology(p, &h); // volcanic strata follow the surface, final once built
     Grid2D<float>& foldOffset = world.createLayer(layers::kFoldOffset, grid.nx, grid.ny, 0.0f, {LayerStyle::Diverging, {}});
     Grid2D<float>& surfaceMaterial = world.createLayer(layers::kSurfaceMaterial, grid.nx, grid.ny, 0.0f,
@@ -465,7 +467,7 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
     const Fbm flankNoise(deriveSeed(topoSeed, "flanks"), {topo.volcano.flankNoiseFrequency, topo.volcano.flankNoiseOctaves,
                                                            topo.noise.lacunarity, topo.noise.gain});
 
-    const RowProgress landProgress{context, 0.4, 0.55, grid.ny};
+    const RowProgress landProgress{context, 0.4, 0.5, grid.ny};
     for (int j = 0; j < grid.ny; ++j) {
         landProgress(j);
         for (int i = 0; i < grid.nx; ++i) {
@@ -492,6 +494,12 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
             land.at(i, j) = static_cast<float>(hLand);
         }
     }
+    // Mountains of the relief zones, on top of the initial topography (and
+    // under the lava flows, which follow them).
+    relief = reliefHeights(p, grid, mask, seed, [&](double t) { context.progress(static_cast<float>(lerp(0.5, 0.6, t))); });
+    for (std::size_t k = 0; k < land.size(); ++k)
+        land.data()[k] += relief.data()[k];
+
     if (topo.mode == "volcanic_cone")
         addLavaFlows(land, mask, grid, topo.volcano, vents, volcanoRng);
 
@@ -527,7 +535,7 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
     Rng jitter(deriveSeed(topoSeed, "jitter"));
     const double boundaryDepth = p.simulation.boundaryDepthM;
 
-    const RowProgress heightProgress{context, 0.55, 0.75, grid.ny};
+    const RowProgress heightProgress{context, 0.6, 0.75, grid.ny};
     for (int j = 0; j < grid.ny; ++j) {
         heightProgress(j);
         for (int i = 0; i < grid.nx; ++i) {

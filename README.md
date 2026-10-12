@@ -90,7 +90,7 @@ La config de référence est [`island_params.jsonc`](island_params.jsonc) (JSON 
   `origin.type` : forme de l'île, matériaux des strates, mode de topographie initiale,
   probabilité de plissement... Elles utilisent la valeur finale, override comprise : forcer
   `origin.type: "volcanic"` donne des strates de basalte et de tuf, avec les mêmes tirages.
-- **Listes** (`geology.strata`). Si le fichier donne un tableau, sa longueur fixe le nombre
+- **Listes** (`geology.strata`, `relief.zones`). Si le fichier donne un tableau, sa longueur fixe le nombre
   d'éléments. Les champs absents ou `null` d'un élément sont tirés comme les autres ;
   `{ "material": "granite" }` fixe le matériau et tire l'épaisseur. Sinon, le nombre vient de
   `*_count`, tiré ou fixé.
@@ -142,6 +142,7 @@ résultat est identique au bit près pour une même seed et une même config.
 | `h`                  | altitude (m), mer à `world.sea_level_y`                                         |
 | `mask`               | terre [0, 1] : smoothstep de `coast_dist` sur `shape.coast_falloff_m`           |
 | `coast_dist`         | distance signée à la côte (m, > 0 = terre) : lobes + domain warp fBm            |
+| `relief`             | montagnes ajoutées par les zones de relief (m) : motif × bruit ridged            |
 | `surface_material`   | matériau à la surface (`material(x, y, h)`)                                     |
 | `lagoon`             | 1 dans le lagon d'un atoll                                                      |
 | `fold_offset`        | déplacement vertical des strates par le pli (m)                                 |
@@ -165,6 +166,7 @@ src/wg/                    bibliothèque "wg" (aucune dépendance au rendu)
   island/IslandLayers      noms des calques de l'île et flags de cellule
   island/IslandGrid        géométrie de la grille de simulation (origine au centre)
   island/Geology           strates et plis : material(x, y, z)
+  island/Relief            montagnes : zones de relief × bruit ridged (noise/Ridged)
   noise/Fbm                fBm OpenSimplex2 (FastNoiseLite)
   core/Random              RNG déterministe et dérivation de graines
   gen/Stage                interface d'une étape

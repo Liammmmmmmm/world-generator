@@ -109,6 +109,34 @@
     }
   },
 
+  // Montagnes par bruit : des zones statiques (motif d'amplitude dans [0, 1]) multipliées par un bruit ridged.
+  // Continentale : 1 à 3 zones, une "range" dans ~60 % des cas ; volcanique : aucune ou des "hills" faibles ;
+  // sédimentaire et corallienne : aucune. Tailles relatives à R, hauteurs relatives à la largeur de la zone.
+  "relief": {
+    "zones": null,
+    // [{ "type": "range" | "massif" | "hills", "center": [x, y], "angle_deg": .., "length_m": .., "width_m": .., "height_m": .. }]
+    //   range  : chaîne, bande le long de l'axe (gaussienne en travers, atténuée aux extrémités) ;
+    //            largeur [0.2, 0.45] R, longueur [0.8, 1.6] R, hauteur [0.5, 1.1] * largeur ;
+    //            la 1re range d'une île continentale suit shape.main_axis_deg
+    //   massif : massif rond ou ovale (gaussienne) ; largeur [0.3, 0.6] R, longueur [1, 1.5] * largeur,
+    //            hauteur [0.4, 0.9] * largeur
+    //   hills  : large zone de collines à sommet plat ; largeur [0.5, 1] R, longueur [1, 2] * largeur,
+    //            hauteur [0.04, 0.12] * largeur (volcanique : [0.02, 0.06])
+    //   center : dans le repère de l'île, à +-0.3 R le long de l'axe (range) ou +-0.5 R (autres)
+    "zone_count": null,
+    "warp_amplitude": null,            // domain warp des zones, en fraction de R [0.1, 0.3]
+    "modulation": null,                // variation basse fréquence de l'amplitude [0, 0.6]
+    "mountain_noise": {                // ridged multifractal (Musgrave) : octaves (1 - |bruit|)², pondérées par la précédente ;
+                                       // 35 % de la hauteur d'une zone est une masse lisse, le reste suit le bruit
+      "frequency": null,               // cycles par rayon [1.5, 4] (log)
+      "octaves": null,                 // [4, 7]
+      "lacunarity": null,              // [1.9, 2.2]
+      "gain": null,                    // [0.4, 0.6]
+      "anisotropy": null,              // étirement du bruit le long de l'axe d'une range [2, 4]
+      "warp_amplitude": null           // domain warp du bruit, en fraction de sa longueur d'onde [0.1, 0.35]
+    }
+  },
+
   "geology": {
     "materials": {
       // hardness [0,1] (résistance à l'érosion) ; erodibility = multiplicateur d'érosion ;

@@ -1,6 +1,6 @@
 # Étape 2 : initialisation de l'île (`island_init`)
 
-Construire l'**état initial** de l'île sur la grille de simulation : contour, fonds marins, relief de départ et géologie. L'étape ne fait **aucune érosion** : c'est l'étape `erosion` qui façonnera cet état.
+Construire l'**état initial** de l'île sur la grille de simulation : contour, fonds marins, relief de départ, montagnes et géologie. L'étape ne fait **aucune érosion** : c'est l'étape `erosion` qui façonnera cet état.
 
 ← [Étape 1](etape-1-parametres.md) · [Vue d'ensemble](README.md)
 
@@ -45,6 +45,7 @@ Chaque usage aléatoire a la sienne :
 | passes et largeur de l'anneau | `deriveSeed(shapeSeed, "ring_passes")`, `"ring_width"` |
 | warp X / Y | `deriveSeed(shapeSeed, "warp_x")`, `"warp_y"` |
 | relief initial | `deriveSeed(seed, "topo")` |
+| zones de relief, bruit de montagnes | `deriveSeed(seed, "relief")` |
 | micro-perturbation | `deriveSeed(topoSeed, "jitter")` |
 | fond marin | `deriveSeed(seed, "seafloor")` |
 
@@ -64,6 +65,7 @@ Tous les calques font `nx × ny` cellules. Les noms sont définis dans
 | `mask` | float, Scalar | terre ∈ [0, 1] |
 | `coast_dist` | float, Diverging | distance signée à la côte (m), > 0 = terre |
 | `lagoon` | float, Scalar | 1 dans le lagon d'un atoll, sinon 0 |
+| `relief` | float, Scalar | hauteur ajoutée par les zones de relief (m) |
 | `surface_material` | float, Categorical | id du matériau en surface (étiquettes = noms des matériaux) |
 | `fold_offset` | float, Diverging | déplacement vertical des strates par le pli (m) |
 | `flags` | octets | bit `kFixed` sur l'anneau de bord, `kInLagoon` dans un lagon |
@@ -297,13 +299,58 @@ terre qui tomberait sous le niveau de la mer est ramenée au niveau de la mer.
 La micro-perturbation (1 mm au plus) évite les zones exactement plates (plateau, mode
 `flat`) : l'eau y garde toujours une direction à suivre.
 
-### 3.4 Conditions aux limites
+### 3.4 Montagnes par bruit (`relief.*`, [Relief.cpp](../src/wg/island/Relief.cpp))
+
+Les montagnes ne viennent d'aucune simulation : ce sont des **zones de relief statiques**,
+chacune un motif d'amplitude dans [0, 1] qui multiplie un bruit de montagnes. Le résultat
+s'ajoute au relief initial (côté terre), avant les coulées de lave, qui suivent donc les
+montagnes, puis passe par le raccord côtier de la section 3.3. Il est aussi rangé dans le
+calque `relief`.
+
+```
+relief(p) = smoothstep(0, 1, mask) · modulation(p) · Σ_zones A_zone(p_w) · height_m · (b + (1 − b) · ridged(p_n))
+```
+
+- **Zones** (repère `u` le long de `angle_deg`, `v` en travers, demi-tailles `L = length_m / 2`
+  et `W = width_m / 2`) :
+  - `range` : `gauss(v / W) · (1 − smoothstep(0.4, 1, |u| / L))`, une bande atténuée aux
+    extrémités ;
+  - `massif` : `gauss(ρ)`, avec `ρ = |(u / L, v / W)|` ;
+  - `hills` : `1 − smoothstep(0.3, 1, ρ)`, une large zone à sommet plat.
+- **Domain warp des zones** (`p_w`) : la position est décalée de `warp_amplitude · R` par
+  deux fBm basse fréquence (1,5 cycle par rayon). Aucun bord de zone n'est donc rectiligne.
+- **Modulation** : `max(0, 1 + modulation · fbm(p))` à 1 cycle par rayon, pour que
+  l'amplitude varie le long d'une chaîne.
+- **Bruit ridged** ([Ridged.hpp](../src/wg/noise/Ridged.hpp), Musgrave) : chaque octave vaut
+  `(1 − |bruit|)²`, multipliée par le poids `clamp(2 · octave précédente, 0, 1)`. Les détails
+  se concentrent sur les crêtes, et les vallées restent lisses. La sortie est normalisée dans
+  [0, 1].
+- **Anisotropie** : dans une `range`, les coordonnées du bruit sont divisées par
+  `anisotropy` le long de l'axe. Les crêtes s'allongent et suivent la chaîne.
+- **Warp du bruit** (`p_n`) : décalage de `warp_amplitude` longueurs d'onde, par une fBm
+  deux fois plus lente que le bruit, contre les crêtes trop régulières.
+- **Masse** (`b = 0,35`, `kRidgeBody`) : une part de la hauteur ne dépend pas du bruit. Sans
+  elle, le ridged donnait un réseau de crêtes fines posé sur une plaine (des « vers »).
+
+Distributions par origine (étape 1) :
+
+| Origine | Zones |
+|---------|-------|
+| continentale | 1 à 3 ; la 1re est une `range` dans 60 % des cas, les suivantes rarement ; la 1re `range` suit `shape.main_axis_deg` |
+| volcanique | aucune ou une `hills` très basse (le cône fait le relief) |
+| sédimentaire, corallienne | aucune |
+
+Les hauteurs sont relatives à la largeur de la zone (`range` : 0,5 à 1,1 fois), ce qui borne
+les pentes. Le relief n'est pas fait pour être beau tel quel : l'érosion le façonnera. Il
+doit surtout être varié et sans artefact.
+
+### 3.5 Conditions aux limites
 
 L'anneau d'une cellule au bord reçoit `flags |= kFixed` et `h = sea + boundary_depth_m`.
 L'érosion maintiendra ces cellules fixes : c'est là que l'eau et les sédiments quittent le
 domaine.
 
-### 3.5 Géologie ([Geology.{hpp,cpp}](../src/wg/island/Geology.hpp))
+### 3.6 Géologie ([Geology.{hpp,cpp}](../src/wg/island/Geology.hpp))
 
 `Geology` décrit la **roche en place** et répond à « quel matériau en (x, y, z) ? ». Elle se
 construit à partir des paramètres (la profondeur cumulée du bas de chaque strate, le pli)
@@ -332,11 +379,11 @@ material(x, y, z):
 - **Les ids de matériaux** indexent `materialNames()`, les noms de `geology.materials` triés.
   Ce sont les catégories du calque `surface_material`, rempli avec `material(x, y, h)`.
 
-### 3.6 Vérifications et suivi en direct
+### 3.7 Vérifications et suivi en direct
 
 - **Altitudes finies :** en fin d'étape, toute altitude non finie lève une `WorldError`.
-- **Progression :** elle est rapportée toutes les 32 lignes (masque : 0 → 40 %, altitudes :
-  40 → 75 %, matériaux : 75 → 95 %). Le viewer montre donc les calques se remplir.
+- **Progression :** elle est rapportée toutes les 32 lignes (masque : 0 → 40 %, relief
+  initial : 40 → 50 %, montagnes : 50 → 60 %, altitudes : 60 → 75 %, matériaux : 75 → 95 %). Le viewer montre donc les calques se remplir.
 
 ## 4. Ce que vérifier dans le viewer
 
@@ -345,6 +392,7 @@ material(x, y, z):
 | `h` | île, liseré bleu clair (plateau), pente ombrée vers un fond plus sombre, cadre uniforme au bord |
 | `mask` | blanc sur l'île, noir en mer, transition douce |
 | `coast_dist` | côte blanche, terre rouge vers l'intérieur, mer bleue vers le large |
+| `relief` | chaînes allongées le long de l'axe, massifs ronds, collines basses ; nul en mer, sans bord droit |
 | `surface_material` | couleurs de la légende ; changer `geology.strata_top_m` change ce qui affleure |
 
 Les tests ([tests/main.cpp](../tests/main.cpp), `testIslandInit`, `testIslandFitsInMap`)

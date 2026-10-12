@@ -39,8 +39,8 @@ public:
     // Custom distribution: `f` maps a uniform value in [0, 1) to the parameter.
     double sample(const std::string& path, const std::function<double(double)>& f);
     int sampleInteger(const std::string& path, const std::function<int(double)>& f);
-    // Point drawn uniformly in a rectangle; config form is [x, y].
-    IslandParams::Vec2 point(const std::string& path, double minX, double maxX, double minY, double maxY);
+    // Point: `f` maps two uniform values in [0, 1) to it; config form is [x, y].
+    IslandParams::Vec2 point(const std::string& path, const std::function<IslandParams::Vec2(double, double)>& f);
 
     // --- Fixed defaults (no randomness) --------------------------------------
     double number(const std::string& path, double fallback);

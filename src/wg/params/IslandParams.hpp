@@ -132,6 +132,30 @@ struct IslandParams {
         } barrier;
     } initialTopography;
 
+    // Mountains made by noise: static zones of amplitude in [0, 1], each
+    // multiplying a ridged multifractal noise.
+    struct ReliefZone {
+        std::string type; // range | massif | hills
+        Vec2 center;
+        double angleDeg = 0.0; // axis of the zone (u)
+        double lengthM = 0.0;  // extent along the axis
+        double widthM = 0.0;   // extent across it
+        double heightM = 0.0;  // peak height added by the zone
+    };
+    struct Relief {
+        std::vector<ReliefZone> zones;
+        double warpAmplitude = 0.0; // domain warp of the zones, relative to R
+        double modulation = 0.0;    // low-frequency variation of the zone amplitude
+        struct MountainNoise {
+            double frequency = 0.0; // cycles per island radius
+            int octaves = 0;
+            double lacunarity = 0.0;
+            double gain = 0.0;
+            double anisotropy = 0.0;    // stretch of the noise along a range's axis
+            double warpAmplitude = 0.0; // domain warp of the noise, relative to its wavelength
+        } mountainNoise;
+    } relief;
+
     struct Material {
         double hardness = 0.0;
         double erodibility = 0.0;
