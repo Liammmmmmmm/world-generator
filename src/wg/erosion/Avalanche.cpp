@@ -9,8 +9,8 @@ namespace wg::erosion {
 namespace {
 
 // Levels of cascade below the modified cell. The references do not cascade;
-// a couple of levels keep a collapse from leaving a step at its foot.
-constexpr int kMaxDepth = 2;
+// a few levels let debris slide down to rest instead of perching on a slope.
+constexpr int kMaxDepth = 6;
 
 struct Neighbor {
     int di, dj;
@@ -37,11 +37,18 @@ void cascade(ErosionMap& map, const Rock& rock, float rate, int i, int j, int de
         const int hi = down ? i : ni, hj = down ? j : nj;
         ErosionCell& high = down ? cell : other;
         ErosionCell& low = down ? other : cell;
-        const float excess = std::abs(diff) - rock.talus(hi, hj, high) * n.distance;
-        if (excess <= 0.0f)
+        float transfer = 0.0f;
+        if (high.sediment > 0.0f) // loose material, at most what there is
+            transfer = std::min(high.sediment,
+                                rate * std::max(0.0f, std::abs(diff) - rock.sedimentTalus(high) * n.distance) / 2.0f);
+        // The rock itself gives way, above the sea only (no erosion under water).
+        const float rockExcess =
+            high.height - high.sediment >= 0.0f ? std::abs(diff) - rock.rockTalus(hi, hj, high) * n.distance : 0.0f;
+        if (rockExcess > 0.0f)
+            transfer = std::max(transfer, rate * rockExcess / 2.0f);
+        if (transfer <= 0.0f)
             continue;
 
-        const float transfer = rate * excess / 2.0f;
         high.height -= transfer; // loose sediment goes first, then rock
         high.sediment = std::max(0.0f, high.sediment - transfer);
         low.height += transfer;

@@ -488,10 +488,11 @@ void resolveErosion(ParamResolver& r, IslandParams& p) {
     // Default: the cell size, i.e. the true geometry (no vertical exaggeration).
     const double cellM = p.world.width * p.world.blockSizeM / p.simulation.resolution;
     e.heightScaleM = r.number("erosion.particles.height_scale_m", cellM);
-    if (e.steps < 0 || e.particlesPerStep < 0 || e.maxAge < 1 || e.gravity <= 0.0 || e.depositionRate < 0.0 ||
+    e.underwaterSteps = r.whole("erosion.particles.underwater_steps", 10);
+    if (e.steps < 0 || e.particlesPerStep < 0 || e.underwaterSteps < 0 || e.maxAge < 1 || e.gravity <= 0.0 || e.depositionRate < 0.0 ||
         e.depositionRate > 1.0 || e.evaporationRate < 0.0 || e.evaporationRate >= 1.0 || e.minVolume <= 0.0 ||
         e.dischargeLrate <= 0.0 || e.dischargeLrate > 1.0 || e.dischargeScale <= 0.0 || e.heightScaleM <= 0.0)
-        throw ConfigError("'erosion.particles': steps, particles_per_step >= 0, max_age >= 1, gravity, min_volume, "
+        throw ConfigError("'erosion.particles': steps, particles_per_step, underwater_steps >= 0, max_age >= 1, gravity, min_volume, "
                           "discharge_scale, height_scale_m > 0, deposition_rate and discharge_lrate in (0, 1], "
                           "evaporation_rate in [0, 1)");
 
@@ -499,8 +500,10 @@ void resolveErosion(ParamResolver& r, IslandParams& p) {
     t.enabled = r.flag("erosion.thermal.enabled", true);
     t.rate = r.uniform("erosion.thermal.rate", 0.6, 1.0);
     t.sedimentTalusAngleDeg = r.number("erosion.thermal.sediment_talus_angle_deg", 33);
-    if (t.rate < 0.0 || t.rate > 1.0 || t.sedimentTalusAngleDeg <= 0.0 || t.sedimentTalusAngleDeg >= 90.0)
-        throw ConfigError("'erosion.thermal': rate in [0, 1], sediment_talus_angle_deg in (0, 90)");
+    t.underwaterTalusAngleDeg = r.number("erosion.thermal.underwater_talus_angle_deg", 18);
+    if (t.rate < 0.0 || t.rate > 1.0 || t.sedimentTalusAngleDeg <= 0.0 || t.sedimentTalusAngleDeg >= 90.0 ||
+        t.underwaterTalusAngleDeg <= 0.0 || t.underwaterTalusAngleDeg >= 90.0)
+        throw ConfigError("'erosion.thermal': rate in [0, 1], talus angles in (0, 90)");
 }
 
 // Not used yet: will weight the rain and drive the dunes.

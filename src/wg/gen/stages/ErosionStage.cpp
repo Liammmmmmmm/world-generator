@@ -56,7 +56,7 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
     const Geology geology(island, &hInitial);
     const erosion::Rock rock(geology, island.geology.materials,
                              {nx, ny, context.info.widthM() / nx, scale, sea}, params.hardnessInfluence,
-                             thermal.sedimentTalusAngleDeg);
+                             thermal.sedimentTalusAngleDeg, thermal.underwaterTalusAngleDeg);
 
     // Back to meters, into the layers.
     const auto publish = [&] {
@@ -89,7 +89,8 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
                      static_cast<float>(params.minVolume),
                      static_cast<float>(params.dischargeScale),
                      &rock,
-                     thermal.enabled ? static_cast<float>(thermal.rate) : 0.0f};
+                     thermal.enabled ? static_cast<float>(thermal.rate) : 0.0f,
+                     params.underwaterSteps};
     settings.particlesPerStep = params.particlesPerStep;
     settings.dischargeLrate = static_cast<float>(params.dischargeLrate);
     erosion::ParticleErosion erosion(map, settings, context.seed);

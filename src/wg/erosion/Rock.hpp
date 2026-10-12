@@ -24,7 +24,7 @@ public:
 
     // `geology` must outlive the Rock.
     Rock(const Geology& geology, const std::map<std::string, IslandParams::Material>& materials, const Frame& frame,
-         double hardnessInfluence, double sedimentTalusAngleDeg);
+         double hardnessInfluence, double sedimentTalusAngleDeg, double underwaterTalusAngleDeg);
 
     // Material id at the rock surface of cell (i, j) (its height minus its sediment).
     int material(int i, int j, const ErosionCell& cell) const;
@@ -33,9 +33,11 @@ public:
     // its material (the loose sediment erodes at the normal rate).
     float erodibility(int i, int j, const ErosionCell& cell) const { return erodibility_[material(i, j, cell)]; }
 
-    // Steepest stable slope at a cell (height per cell), from its talus angle:
-    // the sediment's while it is covered, its rock's otherwise.
-    float talus(int i, int j, const ErosionCell& cell) const;
+    // Steepest stable slopes (height per cell), from the talus angles: of the
+    // rock at the cell's rock surface, and of loose sediment (lower under the
+    // sea, below height 0).
+    float rockTalus(int i, int j, const ErosionCell& cell) const { return talus_[material(i, j, cell)]; }
+    float sedimentTalus(const ErosionCell& cell) const { return cell.height < 0.0f ? underwaterTalus_ : sedimentTalus_; }
 
     // The lowest talus of all: no slope under it can be unstable.
     float minTalus() const { return minTalus_; }
@@ -46,6 +48,7 @@ private:
     std::vector<float> erodibility_; // by material id
     std::vector<float> talus_;       // by material id
     float sedimentTalus_ = 0.0f;
+    float underwaterTalus_ = 0.0f;
     float minTalus_ = 0.0f;
 };
 

@@ -6,11 +6,15 @@
 namespace wg::erosion {
 
 // Thermal erosion (avalanche) around cell (i, j), just modified: with each of
-// its 8 neighbors, the part of the height difference beyond the talus slope
-// of the higher cell (talus · distance) is unstable, and `rate` times half of
-// it slides down to the lower cell, where it becomes loose sediment. A cell
-// that receives matter is checked in turn, over a bounded number of levels.
-// FIXED cells take no part.
+// its 8 neighbors, the part of the height difference beyond a talus slope of
+// the higher cell (talus · distance) is unstable, and `rate` times half of it
+// slides down to the lower cell, where it becomes loose sediment:
+//   - its loose sediment slides beyond the sediment talus, but no more than
+//     its thickness (a veneer of sand does not bring a cliff down);
+//   - its rock gives way beyond the talus of its material, above the sea only
+//     (no erosion under water).
+// A cell that receives matter is checked in turn, over a bounded number of
+// levels. FIXED cells take no part.
 void avalanche(ErosionMap& map, const Rock& rock, float rate, int i, int j);
 
 } // namespace wg::erosion

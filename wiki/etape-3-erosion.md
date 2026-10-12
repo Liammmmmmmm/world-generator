@@ -12,7 +12,7 @@ Code : [erosion/](../src/wg/erosion/) (grille, goutte, boucle des pas) et
 [ErosionStage.cpp](../src/wg/gen/stages/ErosionStage.cpp) (conversion des calques, suivi).
 
 **État :** jalons A (gouttes, transfert de masse, débit), B (avalanche thermique,
-matériaux) et C (élan). À venir : interaction avec la mer (D), performance (E), réglages
+matériaux), C (élan) et D (mer). À venir : interaction avec la mer (D), performance (E), réglages
 par origine (F).
 
 ---
@@ -83,8 +83,12 @@ pour chaque cellule :
 
 Volume 1, sédiment 0, vitesse nulle. À chaque itération, sur la cellule `floor(pos)` :
 
-1. **Mort** sur place si la cellule est en mer, si `age > max_age` ou si
-   `volume < min_volume` : elle dépose tout ce qu'elle porte sur cette cellule.
+1. **Mort** sur place si `age > max_age`, si `volume < min_volume` ou après
+   `underwater_steps` itérations en mer : elle dépose tout ce qu'elle porte sur cette cellule.
+   **En mer** (`h < 0`), la goutte continue donc quelques itérations : sa gravité est réduite
+   à 30 % (elle file surtout sur son élan, un jet dans la mer) et elle ne fait que déposer
+   (`c_eq = 0`, jamais d'érosion sous l'eau). Son sédiment se dépose en avançant : deltas et
+   plages devant les embouchures.
 2. **Gravité** : `g` le gradient de hauteur (différences centrées, décentrées au bord),
    `n = normalize(−g.x, 1, −g.y)`, `speed += gravity · (n.x, n.z) / volume`.
    **Élan** : le courant moyen de la cellule (`momentum`) entraîne la goutte, d'autant plus
@@ -116,6 +120,7 @@ Volume 1, sédiment 0, vitesse nulle. À chaque itération, sur la cellule `floo
 7. **Évaporation** : `volume *= 1 − evaporation_rate`.
 
 **Écarts avec la consigne, alignés sur soillib :**
+- **En mer** (jalon D), voir l'étape 1 ci-dessus.
 - **Le transfert est pondéré par le volume** (`c_eq · volume`) : une goutte qui s'évapore
   porte moins.
 - **L'évaporation ne divise pas le sédiment.** SimpleHydrology faisait
@@ -123,8 +128,6 @@ Volume 1, sédiment 0, vitesse nulle. À chaque itération, sur la cellule `floo
   l'a retiré. Sans cela, la masse est conservée.
 - **Un dépôt est limité à ce que porte la goutte**, sans quoi son sédiment deviendrait
   négatif.
-- **En mer** (en attendant le jalon D), la goutte meurt et dépose sur la première cellule de
-  mer, au lieu de perdre son sédiment.
 
 ### Avalanche thermique ([Avalanche.cpp](../src/wg/erosion/Avalanche.cpp))
 
@@ -138,14 +141,19 @@ si |diff| > limite :
     transfert = thermal.rate · (|diff| − limite) / 2           // de la plus haute à la plus basse
 ```
 
-La matière déplacée quitte d'abord les sédiments de la cellule haute, puis sa roche, et
-devient du **sédiment** chez la cellule basse. Une cellule qui reçoit est vérifiée à son tour,
-sur deux niveaux au plus. Les cellules `FIXED` ne participent pas.
+Deux talus par cellule haute :
+- **ses sédiments meubles** glissent au-delà du talus des sédiments
+  (`thermal.sediment_talus_angle_deg`, ou `thermal.underwater_talus_angle_deg` sous la mer),
+  **mais pas plus que leur épaisseur** : un voile de sable ne fait pas tomber une falaise ;
+- **sa roche** cède au-delà du talus de son matériau, **au-dessus de la mer seulement** (pas
+  d'érosion sous l'eau).
 
-**Talus** ([Rock.cpp](../src/wg/erosion/Rock.cpp)) : celui des sédiments
-(`thermal.sediment_talus_angle_deg`) si la cellule en porte plus de 5 cm, sinon celui du
-matériau de sa roche à nu, `geology.materials[material(x, y, h − sediment)]`. Converti dans le
-repère normalisé : `tan(angle) · cellM / height_scale_m`. Le plus petit talus de tous sert à
+Le transfert est le plus grand des deux. La matière déplacée devient du **sédiment** chez la
+cellule basse. Une cellule qui reçoit est vérifiée à son tour,
+sur six niveaux au plus, pour que les débris glissent jusqu'au repos. Les cellules `FIXED` ne participent pas.
+
+**Talus de la roche** ([Rock.cpp](../src/wg/erosion/Rock.cpp)) : celui du matériau de sa
+surface, `geology.materials[material(x, y, h − sediment)]`. Converti dans le repère normalisé : `tan(angle) · cellM / height_scale_m`. Le plus petit talus de tous sert à
 écarter d'emblée les paires stables, sans consulter la géologie.
 
 On compare chaque paire, comme SimpleHydrology. soillib compare plutôt chaque voisin à la
@@ -229,3 +237,24 @@ angles de talus.
   suivent le courant. `momentum_transfer = 3` change peu.
 - **Coût** : nul, voire négatif (les gouttes atteignent la mer plus vite) : 13 à 15 ms par
   pas avec l'élan contre 17 à 19 ms sans, mesurés côte à côte sur une machine chargée.
+
+## 9. Jalon D : la mer (1000 pas, 4 seeds par origine)
+
+**Correction de l'avalanche au passage.** Jusqu'ici, une cellule couverte de sédiments
+prenait le talus des sédiments pour toute sa colonne : quelques centimètres de sable sur une
+falaise la faisaient s'effondrer à 33° (18° sous la mer), roche comprise. Sur un atoll, le
+tombant du récif (48°, sur un socle de basalte à 45°) s'effondrait à chaque dépôt et une
+cellule de côte perdait 161 m de roche. Les sédiments glissent maintenant seuls, dans la
+limite de leur épaisseur, et la roche sous-marine ne cède plus.
+
+| Critère | Résultat |
+|---------|----------|
+| éventails devant les embouchures | oui, en lobes aux grandes embouchures des îles volcaniques ; tablier continu autour des îles continentales |
+| pics de sédiment sous l'eau | aucun pic isolé ; sédiments trop raides (> 18° et > 0,5 m) : 5 207 cellules sur l'atoll le plus touché (18 479 avant la correction) |
+| l'île reste une île | aucune terre dans le dixième extérieur de la carte, sur les 16 îles |
+| atolls et îles barrières | changement moyen de 0,2 à 0,4 m sur terre (atolls 1 et 2 : 5 à 12 m), surface de terre entre −7 % et +9 % |
+
+**À noter : les îles continentales gagnent 30 à 55 % de terre.** Leurs montagnes, plus raides
+que les talus, s'effondrent et l'érosion (45 m en moyenne) comble le plateau continental
+peu profond (−10 à −60 m) : des plaines côtières apparaissent. C'est là que les méandres ont
+de la place, mais la silhouette de l'île change nettement.

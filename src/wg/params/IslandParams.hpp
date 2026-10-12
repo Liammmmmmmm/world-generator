@@ -200,11 +200,13 @@ struct IslandParams {
             double dischargeScale = 0.0;   // discharge_norm = erf(scale * discharge)
             double hardnessInfluence = 0.0; // exponent of the rock erodibility
             double heightScaleM = 0.0;     // meters per normalized height unit (the cell size by default)
+            int underwaterSteps = 0;       // iterations of a drop after it enters the sea
         } particles;
         struct Thermal {
             bool enabled = true;
             double rate = 0.0;
             double sedimentTalusAngleDeg = 0.0;
+            double underwaterTalusAngleDeg = 0.0; // sediment below sea level
         } thermal;
     } erosion;
 

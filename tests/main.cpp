@@ -706,7 +706,7 @@ void testAvalanche() {
                             .island();
     const wg::Geology geology(params);
     const int n = 15;
-    const wg::erosion::Rock rock(geology, params.geology.materials, {n, n, 1.0, 1.0, 0.0}, 1.0, 33.0);
+    const wg::erosion::Rock rock(geology, params.geology.materials, {n, n, 1.0, 1.0, 0.0}, 1.0, 33.0, 18.0);
     wg::erosion::ErosionMap map(n, n);
     map.at(7, 7).height = 20.0f;
     double before = 0.0;
@@ -738,7 +738,7 @@ void testDropOnFadingFlow() {
     const auto params = wg::WorldConfig::fromJson({{"seed", 1}}).island();
     const wg::Geology geology(params);
     const int n = 32;
-    const wg::erosion::Rock rock(geology, params.geology.materials, {n, n, 1.0, 1.0, 0.0}, 1.0, 33.0);
+    const wg::erosion::Rock rock(geology, params.geology.materials, {n, n, 1.0, 1.0, 0.0}, 1.0, 33.0, 18.0);
     wg::erosion::ErosionMap map(n, n);
     for (int j = 0; j < n; ++j) {
         for (int i = 0; i < n; ++i) {
