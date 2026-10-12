@@ -211,12 +211,22 @@ struct IslandParams {
         } thermal;
     } erosion;
 
-    // Conversion of the heightmap to blocks (step 5).
+    // Rivers and lakes on the eroded terrain (step 4).
+    struct Hydrology {
+        bool enabled = true;
+        double riverMinAreaM2 = 0.0;   // drained area where a river starts (its source)
+        double riverWidthCoeff = 0.0;  // width = coeff * sqrt(drained area in m²)
+        double riverMinWidthM = 0.0;
+        double riverDepthRatio = 0.0;  // depth = ratio * width, at least 1 m
+        double lakeMinDepthM = 0.0;
+        double lakeMinAreaM2 = 0.0;
+    } hydrology;
+
+    // Conversion of the heightmap to blocks (step 6).
     struct Voxelization {
         bool enabled = true;
         int dirtDepthBlocks = 0;       // dirt under the grass on gentle slopes
         double grassMaxSlopeDeg = 0.0; // steeper surfaces are bare stone
-        double riverMinDischarge = 0.0; // discharge_norm from which the surface is a river bed
     } voxelization;
 
     // Not used yet: will weight the rain and drive the dunes.

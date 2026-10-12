@@ -37,7 +37,6 @@ std::string_view minecraftName(Block block) {
     case Block::Gravel: return "minecraft:gravel";
     case Block::Snow: return "minecraft:snow_block";
     case Block::Water: return "minecraft:water";
-    case Block::River: return "minecraft:blue_wool";
     default: return "minecraft:air";
     }
 }
@@ -362,7 +361,7 @@ MinecraftExportReport exportMinecraft(const WorldState& world, const std::filesy
         for (int x = 0; x < voxels.width(); x += 4) {
             const int y = voxels.topNonAir(x, z);
             const Block top = voxels.get(x, y, z);
-            if (top == Block::Water || top == Block::River || y < world.info().seaLevel)
+            if (top == Block::Water || y < world.info().seaLevel)
                 continue;
             const long d = static_cast<long>(x - cx) * (x - cx) + static_cast<long>(z - cz) * (z - cz);
             if (best < 0 || d < best)

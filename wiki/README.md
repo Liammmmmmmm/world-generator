@@ -10,7 +10,8 @@ notice d'utilisation (build, commandes, contrôles du viewer).
 | [Étape 1 : paramètres](etape-1-parametres.md) | Lecture de la config, tirage depuis la seed, overrides, validation |
 | [Étape 2 : initialisation de l'île](etape-2-initialisation.md) | Masque, bathymétrie, topographie, montagnes, géologie |
 | [Étape 3 : érosion](etape-3-erosion.md) | Érosion hydraulique par particules, repère normalisé, lecture pas à pas |
-| [Étape 5 : voxelisation et export Minecraft](etape-5-voxelisation.md) | Hauteurs → blocs, monde Minecraft Java (Anvil) |
+| [Étape 4 : hydrologie](etape-4-hydrologie.md) | Rivières (sources, confluences) et lacs |
+| [Étape 6 : voxelisation et export Minecraft](etape-6-voxelisation.md) | Hauteurs → blocs, monde Minecraft Java (Anvil) |
 
 ---
 
@@ -64,8 +65,8 @@ src/wg/                       bibliothèque "wg", sans dépendance au rendu
     StageParams    paramètres propres à une entrée du "pipeline" JSON (rarement utilisé)
     StageRegistry  "type" → fabrique d'étape, et pipeline par défaut
     Pipeline       construit et exécute les étapes, produit les snapshots, gère live/annulation
-    stages/        les étapes : ParametersStage, IslandInitStage, ErosionStage, PostprocessStage,
-                   VoxelizeStage, BuiltinStages.cpp (registre)
+    stages/        les étapes : ParametersStage, IslandInitStage, ErosionStage, HydrologyStage,
+                   PostprocessStage, VoxelizeStage, BuiltinStages.cpp (registre)
   island/
     IslandLayers   noms des calques de l'île et flags de cellule (contrat entre étapes)
     IslandGrid     géométrie de la grille de simulation (taille, cellule, coordonnées)
@@ -126,7 +127,7 @@ Une étape ([Stage.hpp](../src/wg/gen/Stage.hpp)) implémente
 Le viewer utilise ces changements pour afficher par défaut ce que l'étape a produit.
 
 Le **pipeline par défaut** est défini en code dans
-[BuiltinStages.cpp](../src/wg/gen/stages/BuiltinStages.cpp) (`parameters`, `island_init`, `erosion`, `postprocess`, `voxelize`). Une
+[BuiltinStages.cpp](../src/wg/gen/stages/BuiltinStages.cpp) (`parameters`, `island_init`, `erosion`, `hydrology`, `postprocess`, `voxelize`). Une
 clé `"pipeline"` dans la config permet de le remplacer, par exemple pour tester une étape
 seule.
 

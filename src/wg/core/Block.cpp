@@ -16,7 +16,6 @@ constexpr std::array<BlockInfo, static_cast<std::size_t>(Block::Count)> kBlocks{
     {"gravel", {136, 126, 126}},
     {"snow", {240, 240, 245}},
     {"water", {48, 84, 200}},
-    {"river", {53, 57, 157}},
 }};
 
 } // namespace

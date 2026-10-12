@@ -4,6 +4,7 @@
 
 #include "wg/gen/StageRegistry.hpp"
 #include "wg/gen/stages/ErosionStage.hpp"
+#include "wg/gen/stages/HydrologyStage.hpp"
 #include "wg/gen/stages/IslandInitStage.hpp"
 #include "wg/gen/stages/ParametersStage.hpp"
 #include "wg/gen/stages/PostprocessStage.hpp"
@@ -17,6 +18,7 @@ const StageRegistry& StageRegistry::builtin() {
         r.add<ParametersStage>("parameters");
         r.add<IslandInitStage>("island_init");
         r.add<ErosionStage>("erosion");
+        r.add<HydrologyStage>("hydrology");
         r.add<PostprocessStage>("postprocess");
         r.add<VoxelizeStage>("voxelize");
         return r;
@@ -29,6 +31,7 @@ const std::vector<std::string>& StageRegistry::defaultPipeline() {
         "parameters",
         "island_init",
         "erosion",
+        "hydrology",
         "postprocess",
         "voxelize",
     };

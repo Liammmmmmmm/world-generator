@@ -5,8 +5,8 @@
 
 namespace wg {
 
-// Step 4, after the erosion. Does nothing yet.
-// TODO: lakes (depression filling), river extraction, coastal cliffs.
+// Step 5, after the hydrology. Does nothing yet.
+// TODO: coastal cliffs.
 class PostprocessStage final : public Stage {
 public:
     explicit PostprocessStage(StageParams&) {}

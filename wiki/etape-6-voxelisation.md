@@ -1,10 +1,10 @@
-# Étape 5 : voxelisation (`voxelize`) et export Minecraft
+# Étape 6 : voxelisation (`voxelize`) et export Minecraft
 
 Transformer la carte de hauteurs en blocs, puis écrire le monde au format Minecraft. Une
-première version volontairement simple : peu de matériaux, pas encore de lacs, de végétation
-ni de grottes (des étapes viendront s'intercaler avant celle-ci).
+première version volontairement simple : peu de matériaux, pas encore de végétation ni de
+grottes (des étapes viendront s'intercaler avant celle-ci).
 
-← [Étape 3 : érosion](etape-3-erosion.md) · [Vue d'ensemble](README.md)
+← [Étape 4 : hydrologie](etape-4-hydrologie.md) · [Vue d'ensemble](README.md)
 
 Code : [VoxelizeStage.cpp](../src/wg/gen/stages/VoxelizeStage.cpp),
 [MinecraftExport.cpp](../src/wg/io/MinecraftExport.cpp), [Nbt.cpp](../src/wg/io/Nbt.cpp),
@@ -39,7 +39,8 @@ centaines de mètres) et les sommets coupés en haut (à corriger avec
 | sous la surface | stone |
 | surface en pente douce (≤ `grass_max_slope_deg`, 40°) | grass, sur `dirt_depth_blocks` (3) de dirt ; dirt sous l'eau |
 | surface en pente forte | stone |
-| surface d'une rivière (`discharge_norm ≥ river_min_discharge`, 0,7, hors mer) | `river` (laine bleue dans Minecraft) |
+| rivières de l'hydrologie | lit creusé (dirt), rempli d'eau jusqu'à la surface de la rivière (voir l'[étape 4](etape-4-hydrologie.md#3-aux-blocs)) |
+| lacs | dirt au fond, eau jusqu'au niveau du lac |
 | entre le fond et le niveau de la mer | water |
 
 La pente est mesurée sur les hauteurs interpolées, en blocs par bloc.
@@ -79,7 +80,7 @@ Le dossier produit est un monde complet de **Minecraft Java Edition** : le copie
 - **Sections hors du monde Minecraft** (y < −64 ou ≥ 320) : ignorées, et comptées.
 
 Correspondance des blocs : air, bedrock, stone, dirt, `grass_block`, sand, gravel,
-`snow_block`, water, et `blue_wool` pour les rivières.
+`snow_block`, water.
 
 Les régions sont compressées en parallèle (une par thread) : environ 2 s pour 4096².
 

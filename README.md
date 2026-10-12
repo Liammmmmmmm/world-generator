@@ -139,8 +139,9 @@ l'étape) et les paramètres propres à l'étape.
 | `parameters`  | Étape 1 : publie les paramètres résolus dans l'état du monde (`world.params()`)                |
 | `island_init` | Étape 2 : état initial de l'île sur la grille de simulation, sans érosion (voir ci-dessous)    |
 | `erosion`     | Étape 3 : érosion hydraulique par particules ([wiki](wiki/etape-3-erosion.md))                 |
-| `postprocess` | Étape 4 : vide pour l'instant (lacs, rivières, falaises côtières à venir)                      |
-| `voxelize`    | Étape 5 : blocs (stone, grass/dirt selon la pente, rivières, eau) ([wiki](wiki/etape-5-voxelisation.md)) |
+| `hydrology`   | Étape 4 : rivières et lacs ([wiki](wiki/etape-4-hydrologie.md))                                 |
+| `postprocess` | Étape 5 : vide pour l'instant (falaises côtières à venir)                                      |
+| `voxelize`    | Étape 6 : blocs (stone, grass/dirt selon la pente, rivières, lacs, mer) ([wiki](wiki/etape-6-voxelisation.md)) |
 
 #### `island_init`
 

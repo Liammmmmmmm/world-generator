@@ -25,6 +25,19 @@ inline constexpr std::string_view kEroded = "eroded";                 // h_initi
 inline constexpr std::string_view kMomentum = "momentum";             // direction of the time-averaged water momentum (rad)
 inline constexpr std::string_view kMomentumNorm = "momentum_norm";    // its norm
 
+// Produced by the hydrology.
+inline constexpr std::string_view kWaterSurface = "water_surface"; // h with its depressions filled: lake levels (m)
+inline constexpr std::string_view kLakeDepth = "lake_depth";       // water depth of the lakes (m), 0 elsewhere
+inline constexpr std::string_view kDrainage = "drainage";          // log10 of the drained area (m²)
+inline constexpr std::string_view kRiverWidth = "river_width";     // river width (m), 0 where there is none
+inline constexpr std::string_view kRiverDepth = "river_depth";     // river depth (m)
+inline constexpr std::string_view kFlowDirection = "flow_direction"; // byte layer: D8 receiver (0..7), kNoFlow at outlets
+inline constexpr std::uint8_t kNoFlow = 255;
+// Cell offsets of the flow directions 0..7 (the receiver of (i, j) is
+// (i + kFlowDi[d], j + kFlowDj[d])).
+inline constexpr int kFlowDi[8] = {1, 1, 0, -1, -1, -1, 0, 1};
+inline constexpr int kFlowDj[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+
 enum CellFlags : std::uint8_t {
     kFixed = 1 << 0,  // boundary cell: height held at simulation.boundary_depth_m
     kInLagoon = 1 << 1, // water enclosed by an atoll ring (passes included)

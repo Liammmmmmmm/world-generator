@@ -197,12 +197,23 @@
     }
   },
 
-  // Étape 5 : carte de hauteurs -> blocs (hauteurs interpolées en bicubique, voir aussi world.vertical_exaggeration).
+  // Étape 4 : rivières et lacs sur le relief érodé. Les dépressions sont remplies (lacs), l'eau suit la plus grande
+  // pente jusqu'à la mer, et une rivière naît là où l'aire drainée dépasse river_min_area_m2 (pluie uniforme pour l'instant).
+  "hydrology": {
+    "enabled": true,
+    "river_min_area_m2": 15000,        // aire drainée à la source d'une rivière (plus petit : plus de rivières, plus haut)
+    "river_width_coeff": 0.01,         // largeur = coeff * racine(aire drainée en m²) : 1 km² -> 10 m
+    "river_min_width_m": 2,
+    "river_depth_ratio": 0.15,         // profondeur = ratio * largeur, au moins 1 m
+    "lake_min_depth_m": 0.5,           // eau plus profonde que ça dans une dépression remplie : un lac
+    "lake_min_area_m2": 1000           // plus petit : pas de lac
+  },
+
+  // Étape 6 : carte de hauteurs -> blocs (hauteurs interpolées en bicubique, voir aussi world.vertical_exaggeration).
   "voxelization": {
     "enabled": true,
     "dirt_depth_blocks": 3,            // couches de dirt sous l'herbe, en pente douce
-    "grass_max_slope_deg": 40,         // au-delà, la surface est de la stone
-    "river_min_discharge": 0.7         // discharge_norm à partir duquel la surface est un lit de rivière (laine bleue)
+    "grass_max_slope_deg": 40          // au-delà, la surface est de la stone
   },
 
   // Non utilisé pour l'instant : servira à pondérer la pluie et aux dunes.

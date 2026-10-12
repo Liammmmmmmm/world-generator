@@ -518,11 +518,23 @@ void resolveErosion(ParamResolver& r, IslandParams& p) {
         throw ConfigError("'erosion.thermal': rate in [0, 1], talus angles in (0, 90)");
 }
 
+void resolveHydrology(ParamResolver& r, IslandParams::Hydrology& h) {
+    h.enabled = r.flag("hydrology.enabled", true);
+    h.riverMinAreaM2 = r.number("hydrology.river_min_area_m2", 15000.0);
+    h.riverWidthCoeff = r.number("hydrology.river_width_coeff", 0.01);
+    h.riverMinWidthM = r.number("hydrology.river_min_width_m", 2.0);
+    h.riverDepthRatio = r.number("hydrology.river_depth_ratio", 0.15);
+    h.lakeMinDepthM = r.number("hydrology.lake_min_depth_m", 0.5);
+    h.lakeMinAreaM2 = r.number("hydrology.lake_min_area_m2", 1000.0);
+    if (h.riverMinAreaM2 <= 0.0 || h.riverWidthCoeff < 0.0 || h.riverMinWidthM < 0.0 || h.riverDepthRatio < 0.0 ||
+        h.lakeMinDepthM < 0.0 || h.lakeMinAreaM2 < 0.0)
+        throw ConfigError("'hydrology': river_min_area_m2 > 0, the other sizes >= 0");
+}
+
 void resolveVoxelization(ParamResolver& r, IslandParams::Voxelization& v) {
     v.enabled = r.flag("voxelization.enabled", true);
     v.dirtDepthBlocks = r.whole("voxelization.dirt_depth_blocks", 3);
     v.grassMaxSlopeDeg = r.number("voxelization.grass_max_slope_deg", 40.0);
-    v.riverMinDischarge = r.number("voxelization.river_min_discharge", 0.7);
     if (v.dirtDepthBlocks < 0 || v.grassMaxSlopeDeg < 0.0 || v.grassMaxSlopeDeg > 90.0)
         throw ConfigError("'voxelization': dirt_depth_blocks >= 0, grass_max_slope_deg in [0, 90]");
 }
@@ -538,7 +550,7 @@ void resolveClimate(ParamResolver& r, IslandParams::Climate& c) {
 // Top-level order of the resolved JSON (matches island_params.jsonc).
 constexpr std::array kSectionOrder{
     "seed",    "world",   "simulation",   "origin",  "shape", "initial_topography", "relief", "geology",
-    "erosion", "voxelization", "climate",
+    "erosion", "hydrology", "voxelization", "climate",
 };
 
 } // namespace
@@ -565,6 +577,7 @@ ResolvedParams resolveIslandParams(std::uint64_t seed, const nlohmann::json& con
     resolveRelief(r, p);
     resolveGeology(r, p.geology, p.origin, p.islandRadiusM(), p.shape.mainAxisDeg);
     resolveErosion(r, p);
+    resolveHydrology(r, p.hydrology);
     resolveVoxelization(r, p.voxelization);
     resolveClimate(r, p.climate);
     r.checkNoUnknownKeys();
