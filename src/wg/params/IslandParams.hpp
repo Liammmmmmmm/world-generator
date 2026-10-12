@@ -109,7 +109,8 @@ struct IslandParams {
             double minSpacingM = 0.0; // between volcano centers
             bool caldera = false;
             double calderaRadiusM = 0.0;
-            double calderaRimWidthM = 0.0; // width of the smoothstep wall down to the caldera floor
+            double calderaRimWidthM = 0.0; // width of the rounded crest between the caldera bowl and the flanks
+            double summitIrregularity = 0.0; // relative variation of the crater / caldera radius around the vent
             double calderaDepthM = 0.0;
             int lavaFlowCount = 0;     // per volcano
             double lavaFlowHeightM = 0.0;

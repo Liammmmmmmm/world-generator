@@ -98,19 +98,25 @@ struct Vent {
 };
 
 // Height of a volcano at distance r from its vent: power-law cone, with either
-// a caldera (summit cut at the profile height at the caldera radius, flat floor
-// caldera_depth_m lower, smoothstep wall) or a crater (parabolic hollow).
-double coneHeight(const Volcano& v, double r) {
+// a caldera or a crater. `stretch` scales the radius of the summit hollow in
+// this direction (irregular outline, see summit_irregularity).
+//   - caldera: a bowl, deepest (caldera_depth_m below the rim) at the vent and
+//     parabolic up to the rim, where it meets the flanks over a rounded crest
+//     (the smooth minimum of the two, over a band set by caldera_rim_width_m).
+//     A rounded floor gathers the water at its center, a future crater lake,
+//     and its walls stay gentle enough for the erosion to work on.
+//   - crater: a parabolic hollow.
+double coneHeight(const Volcano& v, double r, double stretch) {
     const auto profile = [&](double d) {
         return v.heightM * std::pow(std::max(0.0, 1.0 - d / v.radiusM), v.profileExponent);
     };
     if (v.caldera) {
-        const double rim = profile(v.calderaRadiusM);
-        if (r >= v.calderaRadiusM)
-            return profile(r);
-        return lerp(rim - v.calderaDepthM, rim, smoothstep(v.calderaRadiusM - v.calderaRimWidthM, v.calderaRadiusM, r));
+        const double t = r / (v.calderaRadiusM * stretch);
+        const double bowl = profile(v.calderaRadiusM) - v.calderaDepthM * (1.0 - t * t); // rises past the rim
+        const double crest = v.calderaDepthM * v.calderaRimWidthM / v.calderaRadiusM;
+        return smoothMin(profile(r), bowl, crest);
     }
-    const double hollow = std::max(0.0, 1.0 - r / v.craterRadiusM);
+    const double hollow = std::max(0.0, 1.0 - r / (v.craterRadiusM * stretch));
     return profile(r) - v.craterDepthM * hollow * hollow;
 }
 
@@ -149,7 +155,7 @@ void addLavaFlows(Grid2D<float>& land, const Grid2D<float>& mask, const IslandGr
     const int reach = static_cast<int>(std::ceil(3.0 * sigma / grid.cellM));
     const double minSlope = std::tan(v.lavaFlowMinSlopeDeg * std::numbers::pi / 180.0);
     const double turn = v.lavaFlowTurnDeg * std::numbers::pi / 180.0;
-    const double summit = 1.1 * (v.caldera ? v.calderaRadiusM : v.craterRadiusM); // just outside the summit hollow
+    const double summit = 1.1 * (1.0 + v.summitIrregularity) * (v.caldera ? v.calderaRadiusM : v.craterRadiusM); // just outside the summit hollow
     const auto cellOf = [&](double x, double y, int& i, int& j) {
         i = static_cast<int>(std::floor(x / grid.cellM + grid.nx * 0.5));
         j = static_cast<int>(std::floor(y / grid.cellM + grid.ny * 0.5));
@@ -466,6 +472,15 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
 
     const Fbm flankNoise(deriveSeed(topoSeed, "flanks"), {topo.volcano.flankNoiseFrequency, topo.volcano.flankNoiseOctaves,
                                                            topo.noise.lacunarity, topo.noise.gain});
+    // Outline of the summit hollows: a single-octave noise read along a small
+    // circle around each vent (its own circle in noise space), so it varies
+    // slowly and smoothly with the angle: a few lobes, no radial fluting.
+    const Fbm summitNoise(deriveSeed(topoSeed, "summit"), {1.0, 1, 2.0, 0.5});
+    const auto summitStretch = [&](const Vent& vent, double dx, double dy) {
+        const double angle = std::atan2(dy, dx);
+        const double cx = 7.0 * vent.x / R, cy = 7.0 * vent.y / R; // far apart in noise space
+        return 1.0 + topo.volcano.summitIrregularity * summitNoise(cx + 0.5 * std::cos(angle), cy + 0.5 * std::sin(angle));
+    };
 
     const RowProgress landProgress{context, 0.4, 0.5, grid.ny};
     for (int j = 0; j < grid.ny; ++j) {
@@ -484,8 +499,10 @@ void IslandInitStage::run(WorldState& world, const StageContext& context) {
                 // Cones (scaled volcanoes: geometric similarity) rising from the base
                 // plateau, the junction rounded over the plateau height.
                 for (const Vent& vent : vents) {
-                    const double r = std::hypot(grid.x(i) - vent.x, grid.y(j) - vent.y);
-                    hLand = smoothMax(hLand, vent.scale * coneHeight(topo.volcano, r / vent.scale), topo.baseElevationM);
+                    const double dx = grid.x(i) - vent.x, dy = grid.y(j) - vent.y;
+                    const double cone =
+                        vent.scale * coneHeight(topo.volcano, std::hypot(dx, dy) / vent.scale, summitStretch(vent, dx, dy));
+                    hLand = smoothMax(hLand, cone, topo.baseElevationM);
                 }
                 // Irregular flanks: on a perfect cone the steepest descent is radial
                 // everywhere and every lava flow would be a straight spoke.

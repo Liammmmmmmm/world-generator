@@ -254,10 +254,15 @@ de la terre, `h_land`, est d'abord calculé sur toute la grille, puis combiné a
   fait serpenter, et donnera prise à l'érosion. L'amplitude est proportionnelle à la longueur
   d'onde (`R / fréquence × [0,03 ; 0,08]`), ce qui borne les pentes du bruit. Une amplitude
   fixe à une longueur d'onde fine faisait des aiguilles.
-- **Caldeira** (si `caldera`, à la place du cratère) :
-  - le sommet est écrêté à l'altitude du profil au rayon de la caldeira ;
-  - le fond est plat, `caldera_depth_m` plus bas ;
-  - la paroi est en smoothstep, de largeur `caldera_rim_width_m`.
+- **Caldeira** (si `caldera`, à la place du cratère) : une **cuvette** parabolique,
+  `caldera_depth_m` sous le rebord au centre, qui remonte jusqu'au rebord (l'altitude du profil
+  au rayon de la caldeira). Elle rejoint les flancs par une crête arrondie : le minimum adouci
+  des deux, sur une bande de `caldera_depth_m × caldera_rim_width_m / caldera_radius_m`. Un
+  fond plat aux parois en marche ne laissait pas de prise à l'érosion ; la cuvette rassemble
+  l'eau en son centre, un futur lac de cratère.
+- **Contour du cratère et de la caldeira :** leur rayon varie selon l'angle autour de la
+  cheminée, de ± `summit_irregularity` (5 à 20 %), d'après un bruit lu le long d'un cercle
+  autour de chaque cheminée (flux `"summit"`). Ils ne sont plus parfaitement ronds.
 - **Coulées :** `lava_flow_count` par volcan. Chacune est une marche aléatoire qui part juste
   à l'extérieur du cratère ou de la caldeira, à un angle aléatoire. À chaque pas (une
   cellule) :

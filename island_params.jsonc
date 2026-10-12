@@ -86,8 +86,9 @@
                                        // tirées dans la moitié intérieure de l'île (distance à la côte >= moitié du maximum)
       "caldera": null,                 // bool ; probabilité 0.2 + 0.4 * origin.age (au lieu du cratère)
       "caldera_radius_m": null,        // [0.15, 0.3] * radius_m
-      "caldera_rim_width_m": null,     // largeur de la paroi de la caldeira ; [0.1, 0.3] * caldera_radius_m
-      "caldera_depth_m": null,         // [0.1, 0.3] * height_m
+      "caldera_rim_width_m": null,     // arrondi de la crête entre la cuvette et les flancs ; [0.1, 0.3] * caldera_radius_m
+      "caldera_depth_m": null,         // profondeur de la cuvette au centre (fond parabolique) ; [0.1, 0.3] * height_m
+      "summit_irregularity": null,     // variation relative du rayon du cratère / de la caldeira selon l'angle [0.05, 0.2]
       "lava_flow_count": null,         // coulées par volcan [0, 8]
       "lava_flow_height_m": null,      // hauteur de la bosse laissée par une coulée [5, 15]
       "lava_flow_width_m": null,       // largeur de la coulée [10, 40]

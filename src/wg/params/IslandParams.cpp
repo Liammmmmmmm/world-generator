@@ -334,6 +334,8 @@ void resolveInitialTopography(ParamResolver& r, IslandParams& p) {
                                   [&](double u) { return v.calderaRadiusM * lerp(0.1, 0.3, u); });
     v.calderaDepthM =
         r.sample("initial_topography.volcano.caldera_depth_m", [&](double u) { return v.heightM * lerp(0.1, 0.3, u); });
+    // Crater and caldera outlines are not perfect circles.
+    v.summitIrregularity = r.uniform("initial_topography.volcano.summit_irregularity", 0.05, 0.2);
     v.lavaFlowCount = r.integer("initial_topography.volcano.lava_flow_count", 0, 8);
     v.lavaFlowHeightM = r.uniform("initial_topography.volcano.lava_flow_height_m", 5, 15);
     v.lavaFlowWidthM = r.uniform("initial_topography.volcano.lava_flow_width_m", 10, 40);
@@ -356,6 +358,7 @@ void resolveInitialTopography(ParamResolver& r, IslandParams& p) {
     t.barrier.crestHeightM = r.uniform("initial_topography.barrier.crest_height_m", 1, 5);
 
     if (v.heightM < 0.0 || v.radiusM <= 0.0 || v.craterRadiusM <= 0.0 || v.calderaRadiusM <= 0.0 ||
+        v.summitIrregularity < 0.0 || v.summitIrregularity >= 1.0 ||
         v.lavaFlowWidthM <= 0.0 || a.pinnacleRadiusM <= 0.0)
         throw ConfigError("'initial_topography.volcano' and 'initial_topography.atoll' sizes must be positive");
 }
