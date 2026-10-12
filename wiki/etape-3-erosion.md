@@ -11,8 +11,8 @@ les corrections de sa bibliothèque **soillib**. Principe : **peu de règles, si
 Code : [erosion/](../src/wg/erosion/) (grille, goutte, boucle des pas) et
 [ErosionStage.cpp](../src/wg/gen/stages/ErosionStage.cpp) (conversion des calques, suivi).
 
-**État :** jalon A (gouttes, transfert de masse, débit). À venir : avalanche thermique et
-matériaux (B), élan et méandres (C), interaction avec la mer (D), performance (E), réglages
+**État :** jalons A (gouttes, transfert de masse, débit) et B (avalanche thermique,
+matériaux). À venir : élan et méandres (C), interaction avec la mer (D), performance (E), réglages
 par origine (F).
 
 ---
@@ -99,7 +99,9 @@ Volume 1, sédiment 0, vitesse nulle. À chaque itération, sur la cellule `floo
    sediment += transfer ;  h(ancienne) −= transfer
    ```
    `transfer > 0` érode la cellule, `< 0` y dépose. L'érosion retire d'abord les sédiments
-   meubles, puis la roche ; un dépôt augmente `height` et `sediment`.
+   meubles au taux normal, puis la roche à son taux : `erodibility^hardness_influence` de son
+   matériau. Un dépôt augmente `height` et `sediment`. La cellule modifiée subit ensuite
+   l'avalanche (section 3.3).
 7. **Évaporation** : `volume *= 1 − evaporation_rate`.
 
 **Écarts avec la consigne, alignés sur soillib :**
@@ -112,6 +114,32 @@ Volume 1, sédiment 0, vitesse nulle. À chaque itération, sur la cellule `floo
   négatif.
 - **En mer** (en attendant le jalon D), la goutte meurt et dépose sur la première cellule de
   mer, au lieu de perdre son sédiment.
+
+### Avalanche thermique ([Avalanche.cpp](../src/wg/erosion/Avalanche.cpp))
+
+Après chaque modification d'une cellule (transfert, dépôt à la mort d'une goutte), pour
+chacun de ses 8 voisins :
+
+```
+diff    = h(i) − h(j)
+limite  = talus(cellule la plus haute) · dist(i, j)          // dist = 1 ou √2
+si |diff| > limite :
+    transfert = thermal.rate · (|diff| − limite) / 2           // de la plus haute à la plus basse
+```
+
+La matière déplacée quitte d'abord les sédiments de la cellule haute, puis sa roche, et
+devient du **sédiment** chez la cellule basse. Une cellule qui reçoit est vérifiée à son tour,
+sur deux niveaux au plus. Les cellules `FIXED` ne participent pas.
+
+**Talus** ([Rock.cpp](../src/wg/erosion/Rock.cpp)) : celui des sédiments
+(`thermal.sediment_talus_angle_deg`) si la cellule en porte plus de 5 cm, sinon celui du
+matériau de sa roche à nu, `geology.materials[material(x, y, h − sediment)]`. Converti dans le
+repère normalisé : `tan(angle) · cellM / height_scale_m`. Le plus petit talus de tous sert à
+écarter d'emblée les paires stables, sans consulter la géologie.
+
+On compare chaque paire, comme SimpleHydrology. soillib compare plutôt chaque voisin à la
+moyenne locale (la cellule et ses 8 voisins), ce qui marque moins la grille ; c'est une
+variante à garder en tête si des directions de grille apparaissent.
 
 ### Bilan de masse
 
@@ -129,6 +157,7 @@ des float.
 | `discharge_norm` | `erf(discharge_scale · discharge)`, dans [0, 1) : le réseau hydrographique |
 | `eroded` | `h_initial − h` (m) : rouge = érosion, bleu = dépôt |
 | `momentum` | norme de l'élan moyen de l'eau (jalon C, vide pour l'instant) |
+| `surface_material` | matériau de la roche à nu (sous les sédiments), mis à jour |
 
 ## 5. Suivi dans le viewer
 
@@ -155,3 +184,24 @@ image en 1024². Le compteur de pas s'affiche dans la liste des étapes.
 Environ 1,4 ms par pas sont fixes (mesuré avec une seule goutte par pas) : la mise à jour des
 cartes parcourt toute la grille (1 M cellules de 32 octets), même quand il y a peu de
 gouttes. Le reste croît avec le nombre de gouttes. À traiter au jalon E.
+
+## 7. Jalon B : ce que l'avalanche change (1000 pas, 1024²)
+
+| Île | Pente p99 sans / avec avalanche | Plus grand saut entre voisins | Pic de sédiment |
+|-----|-------------------------------|-------------------------------|-----------------|
+| volcanique, seed 2 | 60° / 42° | 37 m / 11 m | 17 km (!) / 46 m |
+| continentale, seed 4 | 84° / 66° | 107 m / 36 m | 234 m / 89 m |
+
+Temps par pas : environ +20 % (volcanique 6,3 ms, continentale 2,8 ms). Les pentes
+au-delà de 60° qui restent sont surtout sur la côte, là où les gouttes déposent en mer (à
+traiter au jalon D).
+
+**Limite connue : la dureté des roches n'a presque pas d'effet** dès que l'avalanche est
+active. Sur une île continentale à strates alternées granite / schiste argileux plissées,
+l'érosion moyenne du granite passe de 36,1 m à 35,8 m quand `hardness_influence` passe de 0 à
+1 (sans avalanche : de 19,5 m à 16,8 m). L'avalanche couvre les lits de débris (8 m de
+sédiment en moyenne, contre 2,4 m sans elle), et la goutte érode surtout ces sédiments, au
+taux normal : la roche à nu, là où la dureté joue, est rarement atteinte. Ni un exposant plus
+fort, ni une avalanche freinée par l'érodabilité, ni des montagnes deux fois moins hautes,
+ni 4000 pas n'y changent quelque chose. La seule différence entre roches vient de leurs
+angles de talus.

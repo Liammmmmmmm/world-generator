@@ -9,7 +9,7 @@
 namespace wg::erosion {
 
 struct ParticleErosionParams {
-    DropParams drop;
+    DropParams drop; // drop.rock must be set
     int particlesPerStep = 0; // 0: land cells / kCellsPerParticle
     float dischargeLrate = 0.1f;
 };

@@ -12,7 +12,9 @@ add_library(wg
   wg/gen/stages/ParametersStage.cpp
   wg/params/IslandParams.cpp
   wg/params/ParamResolver.cpp
+  wg/erosion/Avalanche.cpp
   wg/erosion/Drop.cpp
+  wg/erosion/Rock.cpp
   wg/erosion/ParticleErosion.cpp
   wg/island/Geology.cpp
   wg/island/Relief.cpp

@@ -7,6 +7,8 @@
 
 #include "wg/core/WorldState.hpp"
 #include "wg/erosion/ParticleErosion.hpp"
+#include "wg/erosion/Rock.hpp"
+#include "wg/island/Geology.hpp"
 #include "wg/island/IslandLayers.hpp"
 
 namespace wg {
@@ -22,7 +24,9 @@ std::string format(const char* pattern, auto... args) {
 } // namespace
 
 void ErosionStage::run(WorldState& world, const StageContext& context) {
-    const auto& params = world.params().values.erosion.particles;
+    const IslandParams& island = world.params().values;
+    const auto& params = island.erosion.particles;
+    const auto& thermal = island.erosion.thermal;
     Grid2D<float>& h = world.editLayer(layers::kHeight);
     const Grid2D<float>& hInitial = world.layer(layers::kHeightInitial);
     const Grid2D<std::uint8_t>& flags = world.byteLayer(layers::kFlags);
@@ -31,6 +35,7 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
     Grid2D<float>& discharge = world.createLayer(layers::kDischargeNorm, nx, ny, 0.0f, {LayerStyle::Scalar, {}});
     Grid2D<float>& eroded = world.createLayer(layers::kEroded, nx, ny, 0.0f, {LayerStyle::Diverging, {}});
     Grid2D<float>& momentum = world.createLayer(layers::kMomentum, nx, ny, 0.0f, {LayerStyle::Scalar, {}});
+    Grid2D<float>& surfaceMaterial = world.editLayer(layers::kSurfaceMaterial);
 
     // To the normalized frame: cells 1 unit wide, heights in height_scale_m
     // from sea level.
@@ -45,6 +50,12 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
         }
     }
 
+    // The rock under the sediment (volcanic strata follow the initial surface).
+    const Geology geology(island, &hInitial);
+    const erosion::Rock rock(geology, island.geology.materials,
+                             {nx, ny, context.info.widthM() / nx, scale, sea}, params.hardnessInfluence,
+                             thermal.sedimentTalusAngleDeg);
+
     // Back to meters, into the layers.
     const auto publish = [&] {
         for (int j = 0; j < ny; ++j) {
@@ -55,6 +66,7 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
                 discharge.at(i, j) = std::erf(static_cast<float>(params.dischargeScale) * cell.discharge);
                 eroded.at(i, j) = hInitial.at(i, j) - h.at(i, j);
                 momentum.at(i, j) = std::hypot(cell.momentumX, cell.momentumY);
+                surfaceMaterial.at(i, j) = static_cast<float>(rock.material(i, j, cell));
             }
         }
     };
@@ -71,7 +83,9 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
                      static_cast<float>(params.depositionRate),
                      static_cast<float>(params.evaporationRate),
                      static_cast<float>(params.minVolume),
-                     static_cast<float>(params.dischargeScale)};
+                     static_cast<float>(params.dischargeScale),
+                     &rock,
+                     thermal.enabled ? static_cast<float>(thermal.rate) : 0.0f};
     settings.particlesPerStep = params.particlesPerStep;
     settings.dischargeLrate = static_cast<float>(params.dischargeLrate);
     erosion::ParticleErosion erosion(map, settings, context.seed);

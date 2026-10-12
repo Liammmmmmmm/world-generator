@@ -9,6 +9,8 @@
 #include "wg/core/Config.hpp"
 #include "wg/core/Random.hpp"
 #include "wg/core/WorldState.hpp"
+#include "wg/erosion/Avalanche.hpp"
+#include "wg/erosion/Rock.hpp"
 #include "wg/gen/Pipeline.hpp"
 #include "wg/gen/StageRegistry.hpp"
 #include "wg/io/WorldFile.hpp"
@@ -692,6 +694,42 @@ void testErosion() {
     CHECK(std::equal(c.begin(), c.end(), d.begin(), d.end()));
 }
 
+void testAvalanche() {
+    // A spike on a flat bare-rock plain collapses to slopes within the talus,
+    // without creating or losing matter.
+    const auto params = wg::WorldConfig::fromJson({{"seed", 1},
+                                                   {"origin", {{"type", "continental"}}},
+                                                   {"geology", {{"strata", {{{"material", "granite"}, {"thickness_m", 500}}}},
+                                                                {"strata_top_m", 100},
+                                                                {"folding", {{"enabled", false}}}}}})
+                            .island();
+    const wg::Geology geology(params);
+    const int n = 15;
+    const wg::erosion::Rock rock(geology, params.geology.materials, {n, n, 1.0, 1.0, 0.0}, 1.0, 33.0);
+    wg::erosion::ErosionMap map(n, n);
+    map.at(7, 7).height = 20.0f;
+    double before = 0.0;
+    for (std::size_t k = 0; k < map.size(); ++k)
+        before += map[k].height;
+    for (int pass = 0; pass < 200; ++pass)
+        for (int j = 0; j < n; ++j)
+            for (int i = 0; i < n; ++i)
+                wg::erosion::avalanche(map, rock, 1.0f, i, j);
+    double after = 0.0, steepest = 0.0;
+    for (int j = 0; j < n; ++j) {
+        for (int i = 0; i + 1 < n; ++i) {
+            steepest = std::max(steepest, static_cast<double>(std::abs(map.at(i, j).height - map.at(i + 1, j).height)));
+            after += map.at(i, j).height;
+        }
+        after += map.at(n - 1, j).height;
+    }
+    CHECK(std::abs(after - before) < 1e-3);
+    // The talus of the higher cell bounds each slope: the bare granite top
+    // (50°) stands steeper than the sediment around it (33°).
+    CHECK(steepest <= std::tan(50.0 * std::numbers::pi / 180.0) + 0.05);
+    CHECK(map.at(7, 7).height < 10.0f && map.at(7, 7).sediment == 0.0f && map.at(7, 9).sediment > 0.0f);
+}
+
 void testStepGate() {
     // A gate asking for every step gets one preview per step, in order.
     std::vector<int> steps;
@@ -781,6 +819,7 @@ int main() {
     testGeology();
     testGeologyFolds();
     testErosion();
+    testAvalanche();
     testStepGate();
     testVoxelVolume();
     testWorldFileRoundTrip();
