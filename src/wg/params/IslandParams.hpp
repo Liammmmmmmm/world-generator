@@ -211,6 +211,14 @@ struct IslandParams {
         } thermal;
     } erosion;
 
+    // Conversion of the heightmap to blocks (step 5).
+    struct Voxelization {
+        bool enabled = true;
+        int dirtDepthBlocks = 0;       // dirt under the grass on gentle slopes
+        double grassMaxSlopeDeg = 0.0; // steeper surfaces are bare stone
+        double riverMinDischarge = 0.0; // discharge_norm from which the surface is a river bed
+    } voxelization;
+
     // Not used yet: will weight the rain and drive the dunes.
     struct Climate {
         double humidity = 0.0;

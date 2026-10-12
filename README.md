@@ -34,6 +34,11 @@ Options CMake : `-DWG_BUILD_VIEWER=OFF` (sans raylib), `-DWG_BUILD_TESTS=OFF`.
 # ...chaque île avant et après l'érosion, côte à côte
 ./build/apps/wgen/wgen island_params.jsonc --gallery output/erosion.png --origin all --before-after
 
+# Monde Minecraft Java (à copier dans .minecraft/saves) : en fin de génération...
+./build/apps/wgen/wgen island_params.jsonc --minecraft output/MonIle
+# ...ou depuis un monde déjà généré
+./build/apps/wmc/wmc output/island_params.wgw output/MonIle
+
 # Visualiser depuis une config : la génération se suit en direct, chaque étape
 # est inspectable, et tout est régénéré à chaque sauvegarde du fichier
 ./build/apps/wview/wview island_params.jsonc
@@ -135,6 +140,7 @@ l'étape) et les paramètres propres à l'étape.
 | `island_init` | Étape 2 : état initial de l'île sur la grille de simulation, sans érosion (voir ci-dessous)    |
 | `erosion`     | Étape 3 : érosion hydraulique par particules ([wiki](wiki/etape-3-erosion.md))                 |
 | `postprocess` | Étape 4 : vide pour l'instant (lacs, rivières, falaises côtières à venir)                      |
+| `voxelize`    | Étape 5 : blocs (stone, grass/dirt selon la pente, rivières, eau) ([wiki](wiki/etape-5-voxelisation.md)) |
 
 #### `island_init`
 

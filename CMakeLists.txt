@@ -17,6 +17,7 @@ include(cmake/Dependencies.cmake)
 
 add_subdirectory(src)
 add_subdirectory(apps/wgen)
+add_subdirectory(apps/wmc)
 if(WG_BUILD_VIEWER)
   add_subdirectory(apps/wview)
 endif()

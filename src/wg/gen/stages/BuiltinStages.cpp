@@ -7,6 +7,7 @@
 #include "wg/gen/stages/IslandInitStage.hpp"
 #include "wg/gen/stages/ParametersStage.hpp"
 #include "wg/gen/stages/PostprocessStage.hpp"
+#include "wg/gen/stages/VoxelizeStage.hpp"
 
 namespace wg {
 
@@ -17,6 +18,7 @@ const StageRegistry& StageRegistry::builtin() {
         r.add<IslandInitStage>("island_init");
         r.add<ErosionStage>("erosion");
         r.add<PostprocessStage>("postprocess");
+        r.add<VoxelizeStage>("voxelize");
         return r;
     }();
     return registry;
@@ -28,6 +30,7 @@ const std::vector<std::string>& StageRegistry::defaultPipeline() {
         "island_init",
         "erosion",
         "postprocess",
+        "voxelize",
     };
     return stages;
 }

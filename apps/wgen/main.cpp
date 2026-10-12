@@ -15,6 +15,7 @@
 #include "Gallery.hpp"
 #include "wg/core/Config.hpp"
 #include "wg/gen/Pipeline.hpp"
+#include "wg/io/MinecraftExport.hpp"
 #include "wg/io/PngExport.hpp"
 #include "wg/io/WorldFile.hpp"
 #include "wg/render/MapRenderer.hpp"
@@ -26,10 +27,12 @@ namespace {
 void printUsage() {
     std::fprintf(stderr,
                  "usage: wgen <config.jsonc> [-o <world.wgw>] [--params <params.json>] [--png <map.png>] [--stages <dir>]\n"
+                 "            [--minecraft <dir>]\n"
                  "  -o        output world file (default: output/<config name>.wgw)\n"
                  "  --params  write the resolved parameters (every value filled in) as JSON\n"
                  "  --png     export a top-down map of the final world\n"
                  "  --stages  export a top-down map after every stage into <dir>\n"
+                 "  --minecraft  also write the world as a Minecraft Java world into <dir> (see wmc)\n"
                  "\n"
                  "usage: wgen <config.jsonc> --gallery <sheet.png> [options]\n"
                  "  generates many seeds and assembles hillshaded thumbnails into one sheet\n"
@@ -46,7 +49,7 @@ void printUsage() {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::optional<fs::path> configPath, outPath, paramsPath, pngPath, stagesDir;
+    std::optional<fs::path> configPath, outPath, paramsPath, pngPath, stagesDir, minecraftDir;
     std::optional<fs::path> galleryPath;
     GalleryOptions gallery;
     const auto number = [](const char* text) { // -1 when not a number (then rejected)
@@ -68,6 +71,8 @@ int main(int argc, char** argv) {
             pngPath = argv[++i];
         else if (arg == "--stages" && hasValue)
             stagesDir = argv[++i];
+        else if (arg == "--minecraft" && hasValue)
+            minecraftDir = argv[++i];
         else if (arg == "--gallery" && hasValue)
             galleryPath = argv[++i];
         else if (arg == "--count" && hasValue)
@@ -152,6 +157,14 @@ int main(int argc, char** argv) {
 
         wg::writeWorld(final.state, *outPath);
         std::printf("World saved to %s\n", outPath->string().c_str());
+
+        if (minecraftDir) {
+            wg::MinecraftExportOptions minecraft;
+            minecraft.levelName = minecraftDir->filename().string();
+            const auto report = wg::exportMinecraft(final.state, *minecraftDir, minecraft);
+            std::printf("Minecraft world saved to %s (%d chunks, spawn at %d %d %d)\n", minecraftDir->string().c_str(),
+                        report.chunks, report.spawnX, report.spawnY, report.spawnZ);
+        }
 
         if (pngPath) {
             auto view = wg::defaultView(final);

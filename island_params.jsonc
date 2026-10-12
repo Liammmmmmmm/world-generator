@@ -197,6 +197,14 @@
     }
   },
 
+  // Étape 5 : carte de hauteurs -> blocs (hauteurs interpolées en bicubique, voir aussi world.vertical_exaggeration).
+  "voxelization": {
+    "enabled": true,
+    "dirt_depth_blocks": 3,            // couches de dirt sous l'herbe, en pente douce
+    "grass_max_slope_deg": 40,         // au-delà, la surface est de la stone
+    "river_min_discharge": 0.7         // discharge_norm à partir duquel la surface est un lit de rivière (laine bleue)
+  },
+
   // Non utilisé pour l'instant : servira à pondérer la pluie et aux dunes.
   "climate": {
     "humidity": null,                  // [0,1]

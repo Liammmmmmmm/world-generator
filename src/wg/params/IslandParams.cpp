@@ -518,6 +518,15 @@ void resolveErosion(ParamResolver& r, IslandParams& p) {
         throw ConfigError("'erosion.thermal': rate in [0, 1], talus angles in (0, 90)");
 }
 
+void resolveVoxelization(ParamResolver& r, IslandParams::Voxelization& v) {
+    v.enabled = r.flag("voxelization.enabled", true);
+    v.dirtDepthBlocks = r.whole("voxelization.dirt_depth_blocks", 3);
+    v.grassMaxSlopeDeg = r.number("voxelization.grass_max_slope_deg", 40.0);
+    v.riverMinDischarge = r.number("voxelization.river_min_discharge", 0.7);
+    if (v.dirtDepthBlocks < 0 || v.grassMaxSlopeDeg < 0.0 || v.grassMaxSlopeDeg > 90.0)
+        throw ConfigError("'voxelization': dirt_depth_blocks >= 0, grass_max_slope_deg in [0, 90]");
+}
+
 // Not used yet: will weight the rain and drive the dunes.
 void resolveClimate(ParamResolver& r, IslandParams::Climate& c) {
     c.humidity = r.uniform("climate.humidity", 0, 1);
@@ -528,7 +537,8 @@ void resolveClimate(ParamResolver& r, IslandParams::Climate& c) {
 
 // Top-level order of the resolved JSON (matches island_params.jsonc).
 constexpr std::array kSectionOrder{
-    "seed", "world", "simulation", "origin", "shape", "initial_topography", "relief", "geology", "erosion", "climate",
+    "seed",    "world",   "simulation",   "origin",  "shape", "initial_topography", "relief", "geology",
+    "erosion", "voxelization", "climate",
 };
 
 } // namespace
@@ -555,6 +565,7 @@ ResolvedParams resolveIslandParams(std::uint64_t seed, const nlohmann::json& con
     resolveRelief(r, p);
     resolveGeology(r, p.geology, p.origin, p.islandRadiusM(), p.shape.mainAxisDeg);
     resolveErosion(r, p);
+    resolveVoxelization(r, p.voxelization);
     resolveClimate(r, p.climate);
     r.checkNoUnknownKeys();
 

@@ -14,6 +14,8 @@
 #include "wg/erosion/Rock.hpp"
 #include "wg/gen/Pipeline.hpp"
 #include "wg/gen/StageRegistry.hpp"
+#include "wg/io/MinecraftExport.hpp"
+#include "wg/io/Nbt.hpp"
 #include "wg/io/WorldFile.hpp"
 #include "wg/island/Geology.hpp"
 #include "wg/island/IslandGrid.hpp"
@@ -666,13 +668,15 @@ void testGeologyFolds() {
 }
 
 // Particle erosion on a small volcanic island (only a few steps).
-std::vector<wg::Snapshot> runErosion(nlohmann::json particles, const wg::PipelineCallbacks& callbacks = {}) {
+std::vector<wg::Snapshot> runErosion(nlohmann::json particles, const wg::PipelineCallbacks& callbacks = {},
+                                     const nlohmann::json& voxelization = nlohmann::json::object()) {
     particles["steps"] = particles.value("steps", 30);
     const auto loaded = wg::WorldConfig::fromJson({{"seed", 2},
                                                    {"world", {{"width", 1024}, {"length", 1024}}},
                                                    {"simulation", {{"resolution", 256}}},
                                                    {"origin", {{"type", "volcanic"}}},
-                                                   {"erosion", {{"particles", particles}}}});
+                                                   {"erosion", {{"particles", particles}}},
+                                                   {"voxelization", voxelization}});
     return wg::Pipeline::fromConfig(loaded).run(loaded, callbacks);
 }
 
@@ -681,7 +685,8 @@ void testErosion() {
     wg::PipelineCallbacks callbacks;
     callbacks.onLog = [&](std::size_t, const std::string& message) { logs.push_back(message); };
     const auto snapshots = runErosion(nlohmann::json::object(), callbacks);
-    CHECK(snapshots.size() == 4 && snapshots[2].stageName == "erosion" && snapshots[3].stageName == "postprocess");
+    CHECK(snapshots.size() == 5 && snapshots[2].stageName == "erosion" && snapshots[3].stageName == "postprocess" &&
+          snapshots[4].stageName == "voxelize");
     const auto& state = snapshots[2].state;
     CHECK(snapshots[2].step == 30 && snapshots[2].totalSteps == 30);
 
@@ -697,7 +702,9 @@ void testErosion() {
 
     // Mass balance, logged: Σ h + sediment out of the domain is conserved.
     double drift = 1.0;
-    std::sscanf(logs.back().c_str(), "step %*d: %*f ms/step, sediment out %*f, mass drift %*g (%lg", &drift);
+    const auto last = std::find_if(logs.rbegin(), logs.rend(), [](const std::string& m) { return m.starts_with("step "); });
+    CHECK(last != logs.rend());
+    std::sscanf(last->c_str(), "step %*d: %*f ms/step, sediment out %*f, mass drift %*g (%lg", &drift);
     CHECK(std::abs(drift) < 1e-7);
 
     // Deterministic.
@@ -709,6 +716,72 @@ void testErosion() {
     const auto off = runErosion({{"enabled", false}});
     const auto c = off[2].state.layer(wg::layers::kHeight).data(), d = off[1].state.layer(wg::layers::kHeight).data();
     CHECK(std::equal(c.begin(), c.end(), d.begin(), d.end()));
+}
+
+void testVoxelize() {
+    // (a short erosion: a low threshold for the rivers)
+    const auto snapshots = runErosion(nlohmann::json::object(), {}, {{"river_min_discharge", 0.05}});
+    const auto& state = snapshots[4].state;
+    CHECK(state.hasVoxels() && snapshots[4].voxelsChanged);
+    const auto& voxels = state.voxels();
+    const auto& info = state.info();
+    CHECK(voxels.width() == info.width && voxels.length() == info.length);
+
+    // Open sea in a corner: bedrock, stone, then water up to sea level.
+    CHECK(voxels.get(3, info.minY, 3) == wg::Block::Bedrock);
+    CHECK(voxels.get(3, info.seaLevel - 1, 3) == wg::Block::Water && voxels.get(3, info.seaLevel, 3) == wg::Block::Air);
+
+    // Land: the surface follows h (to the rounding and the bicubic
+    // interpolation), with grass, bare stone on steep slopes, and rivers.
+    const auto& h = state.layer(wg::layers::kHeight);
+    int counts[static_cast<int>(wg::Block::Count)] = {};
+    int far = 0, land = 0;
+    for (int z = 0; z < info.length; z += 3) {
+        for (int x = 0; x < info.width; x += 3) {
+            const int top = voxels.topNonAir(x, z);
+            ++counts[static_cast<int>(voxels.get(x, top, z))];
+            const double hm = wg::sampleCentered(h, (x + 0.5) * info.blockSizeM - info.widthM() / 2,
+                                                 (z + 0.5) * info.blockSizeM - info.lengthM() / 2, info.widthM(),
+                                                 info.lengthM());
+            if (hm > info.seaLevelM() + 1.0) {
+                ++land;
+                far += std::abs(top - (info.seaLevel + hm / info.blockSizeM)) > 3.0;
+            }
+        }
+    }
+    CHECK(land > 1000 && far < land / 50);
+    CHECK(counts[static_cast<int>(wg::Block::Grass)] > 0 && counts[static_cast<int>(wg::Block::Stone)] > 0);
+    CHECK(counts[static_cast<int>(wg::Block::River)] > 0 && counts[static_cast<int>(wg::Block::Water)] > 0);
+}
+
+void testNbt() {
+    // Byte for byte: TAG_Compound "" { TAG_Int "a" = 1, TAG_List "l" of 1 string "x" }.
+    wg::nbt::Writer w;
+    w.beginCompound("");
+    w.intTag("a", 1);
+    w.beginList("l", wg::nbt::Tag::String, 1);
+    w.stringPayload("x");
+    w.endCompound();
+    const std::vector<std::uint8_t> expected{10, 0, 0, 3, 0, 1, 'a', 0, 0, 0, 1,
+                                             9, 0, 1, 'l', 8, 0, 0, 0, 1, 0, 1, 'x', 0};
+    CHECK(w.bytes() == expected);
+}
+
+void testMinecraftExport() {
+    const auto snapshots = runErosion({{"steps", 5}});
+    const auto dir = std::filesystem::temp_directory_path() / "wg_minecraft_test";
+    std::filesystem::remove_all(dir);
+    const auto report = wg::exportMinecraft(snapshots.back().state, dir);
+    // 1024 blocks: 64 x 64 chunks, centered on the origin: regions -1..0 on both axes.
+    CHECK(report.chunks == 64 * 64 && report.regions == 4 && report.sectionsDropped == 0);
+    CHECK(std::filesystem::file_size(dir / "level.dat") > 100);
+    for (const char* region : {"r.-1.-1.mca", "r.-1.0.mca", "r.0.-1.mca", "r.0.0.mca"}) {
+        const auto path = dir / "region" / region;
+        CHECK(std::filesystem::exists(path) && std::filesystem::file_size(path) % 4096 == 0 &&
+              std::filesystem::file_size(path) > 8192);
+    }
+    CHECK(report.spawnY > snapshots.back().state.info().seaLevel); // on land
+    std::filesystem::remove_all(dir);
 }
 
 void testAvalanche() {
@@ -864,6 +937,9 @@ int main() {
     testGeology();
     testGeologyFolds();
     testErosion();
+    testVoxelize();
+    testNbt();
+    testMinecraftExport();
     testAvalanche();
     testDropOnFadingFlow();
     testStepGate();

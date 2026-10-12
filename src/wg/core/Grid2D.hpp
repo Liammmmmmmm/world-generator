@@ -61,4 +61,31 @@ inline float sampleCentered(const Grid2D<float>& grid, double x, double y, doubl
     return top * (1 - ty) + bottom * ty;
 }
 
+// Bicubic (Catmull-Rom) sample, same conventions as sampleCentered: smooth
+// (continuous slopes) and through the cell values, for upscaling heightmaps.
+inline float sampleCubic(const Grid2D<float>& grid, double x, double y, double widthM, double lengthM) {
+    const double fx = (x / widthM + 0.5) * grid.width() - 0.5;
+    const double fy = (y / lengthM + 0.5) * grid.length() - 0.5;
+    const int i = static_cast<int>(std::floor(fx)), j = static_cast<int>(std::floor(fy));
+    const double tx = fx - i, ty = fy - j;
+    const auto weights = [](double t, double w[4]) {
+        const double t2 = t * t, t3 = t2 * t;
+        w[0] = 0.5 * (-t3 + 2.0 * t2 - t);
+        w[1] = 0.5 * (3.0 * t3 - 5.0 * t2 + 2.0);
+        w[2] = 0.5 * (-3.0 * t3 + 4.0 * t2 + t);
+        w[3] = 0.5 * (t3 - t2);
+    };
+    double wx[4], wy[4];
+    weights(tx, wx);
+    weights(ty, wy);
+    double sum = 0.0;
+    for (int b = 0; b < 4; ++b) {
+        double row = 0.0;
+        for (int a = 0; a < 4; ++a)
+            row += wx[a] * grid.atClamped(i - 1 + a, j - 1 + b);
+        sum += wy[b] * row;
+    }
+    return static_cast<float>(sum);
+}
+
 } // namespace wg

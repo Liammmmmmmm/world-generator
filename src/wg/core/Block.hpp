@@ -18,6 +18,7 @@ enum class Block : std::uint8_t {
     Gravel,
     Snow,
     Water,
+    River, // marker on the surface of a river bed (for now; Minecraft: blue wool)
     Count
 };
 

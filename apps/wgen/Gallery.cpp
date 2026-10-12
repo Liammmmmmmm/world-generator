@@ -10,6 +10,7 @@
 
 #include "wg/core/Config.hpp"
 #include "wg/gen/Pipeline.hpp"
+#include "wg/gen/StageRegistry.hpp"
 #include "wg/io/PngExport.hpp"
 #include "wg/island/IslandLayers.hpp"
 #include "wg/render/ImageOps.hpp"
@@ -40,6 +41,14 @@ void generate(const GalleryOptions& options, const nlohmann::json& raw, Job& job
         config["origin"]["type"] = job.origin;
     if (options.resolution)
         config["simulation"]["resolution"] = *options.resolution;
+    // Thumbnails only need the heights: skip the voxelization (memory and
+    // time, times the islands generated in parallel).
+    if (!config.contains("pipeline")) {
+        config["pipeline"] = nlohmann::json::array();
+        for (const auto& type : wg::StageRegistry::defaultPipeline())
+            if (type != "voxelize")
+                config["pipeline"].push_back({{"type", type}});
+    }
 
     const auto loaded = wg::WorldConfig::fromJson(config);
     const auto snapshots = wg::Pipeline::fromConfig(loaded).run(loaded);

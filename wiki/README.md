@@ -10,6 +10,7 @@ notice d'utilisation (build, commandes, contrôles du viewer).
 | [Étape 1 : paramètres](etape-1-parametres.md) | Lecture de la config, tirage depuis la seed, overrides, validation |
 | [Étape 2 : initialisation de l'île](etape-2-initialisation.md) | Masque, bathymétrie, topographie, montagnes, géologie |
 | [Étape 3 : érosion](etape-3-erosion.md) | Érosion hydraulique par particules, repère normalisé, lecture pas à pas |
+| [Étape 5 : voxelisation et export Minecraft](etape-5-voxelisation.md) | Hauteurs → blocs, monde Minecraft Java (Anvil) |
 
 ---
 
@@ -64,7 +65,7 @@ src/wg/                       bibliothèque "wg", sans dépendance au rendu
     StageRegistry  "type" → fabrique d'étape, et pipeline par défaut
     Pipeline       construit et exécute les étapes, produit les snapshots, gère live/annulation
     stages/        les étapes : ParametersStage, IslandInitStage, ErosionStage, PostprocessStage,
-                   BuiltinStages.cpp (registre)
+                   VoxelizeStage, BuiltinStages.cpp (registre)
   island/
     IslandLayers   noms des calques de l'île et flags de cellule (contrat entre étapes)
     IslandGrid     géométrie de la grille de simulation (taille, cellule, coordonnées)
@@ -74,9 +75,10 @@ src/wg/                       bibliothèque "wg", sans dépendance au rendu
   noise/Ridged     bruit ridged multifractal (Musgrave)
   erosion/         érosion par particules : ErosionMap (cellules), Drop (une goutte), ParticleErosion (les pas)
   render/          vues, palettes, rendu 2D (partagé par le PNG et le viewer)
-  io/              format natif .wgw, export PNG
+  io/              format natif .wgw, export PNG, NBT et export Minecraft (Anvil)
 apps/
-  wgen/            CLI : config → .wgw / PNG / params.json
+  wgen/            CLI : config → .wgw / PNG / params.json / monde Minecraft
+  wmc/             CLI : .wgw → monde Minecraft Java
   wview/           viewer raylib : GenerationJob (thread), Meshes (3D), main (UI)
 tests/main.cpp     tests unitaires (sans framework)
 ```
@@ -124,7 +126,7 @@ Une étape ([Stage.hpp](../src/wg/gen/Stage.hpp)) implémente
 Le viewer utilise ces changements pour afficher par défaut ce que l'étape a produit.
 
 Le **pipeline par défaut** est défini en code dans
-[BuiltinStages.cpp](../src/wg/gen/stages/BuiltinStages.cpp) (`parameters`, `island_init`, `erosion`, `postprocess`). Une
+[BuiltinStages.cpp](../src/wg/gen/stages/BuiltinStages.cpp) (`parameters`, `island_init`, `erosion`, `postprocess`, `voxelize`). Une
 clé `"pipeline"` dans la config permet de le remplacer, par exemple pour tester une étape
 seule.
 
@@ -180,7 +182,11 @@ Il charge la config, exécute le pipeline et écrit :
 Le mode **galerie** (`--gallery sheet.png`, [Gallery.cpp](../apps/wgen/Gallery.cpp)) génère
 `--count` seeds en parallèle, une par cœur. Les options :
 - `--origin TYPE` force l'origine, et `--origin all` produit un groupe par origine ;
-- `--resolution` réduit la grille pour aller plus vite.
+- `--resolution` réduit la grille pour aller plus vite ;
+- `--before-after` place chaque île avant et après l'érosion côte à côte.
+
+Les vignettes ne montrent que les hauteurs : la galerie saute l'étape `voxelize` (sauf si la
+config donne sa propre clé `pipeline`).
 
 Le résultat est une planche PNG de vignettes en hillshade, légendées avec la seed et
 l'origine. Elle sert à juger d'un coup d'œil la variété des îles.

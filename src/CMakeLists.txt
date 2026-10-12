@@ -8,6 +8,7 @@ add_library(wg
   wg/gen/StageRegistry.cpp
   wg/gen/stages/BuiltinStages.cpp
   wg/gen/stages/ErosionStage.cpp
+  wg/gen/stages/VoxelizeStage.cpp
   wg/gen/stages/IslandInitStage.cpp
   wg/gen/stages/ParametersStage.cpp
   wg/params/IslandParams.cpp
@@ -18,6 +19,8 @@ add_library(wg
   wg/erosion/ParticleErosion.cpp
   wg/island/Geology.cpp
   wg/island/Relief.cpp
+  wg/io/MinecraftExport.cpp
+  wg/io/Nbt.cpp
   wg/io/PngExport.cpp
   wg/io/WorldFile.cpp
   wg/render/CrossSection.cpp
@@ -25,9 +28,10 @@ add_library(wg
   wg/render/MapRenderer.cpp
 )
 target_include_directories(wg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+find_package(ZLIB REQUIRED) # Minecraft export (system library)
 target_link_libraries(wg
   PUBLIC nlohmann_json::nlohmann_json fastnoiselite
-  PRIVATE stb)
+  PRIVATE stb ZLIB::ZLIB)
 target_compile_options(wg PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
   $<$<CXX_COMPILER_ID:MSVC>:/W4>)
