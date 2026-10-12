@@ -20,10 +20,14 @@ Code : [VoxelizeStage.cpp](../src/wg/gen/stages/VoxelizeStage.cpp),
 une colonne par cellule, sans interpolation.
 
 ```
-y_surface = floor(sea_level_y + (h − niveau de la mer) / block_size_m × vertical_exaggeration)
+y   = sea_level_y + (h − niveau de la mer) / block_size_m × vertical_exaggeration
+top = floor(y) − 1          // le bloc du dessus : sa face supérieure est à floor(y)
 ```
 
-limité à `[min_y + 1, max_y − 1]`. L'étape logue les colonnes limitées : les fonds marins
+C'est la convention de la mer, dont le bloc du dessus (`sea_level_y − 1`) a sa face
+supérieure au niveau de la mer : un sol entre 0 et 1 m est au ras de l'eau, comme le montre
+le visualiseur (et non un bloc au-dessus). Même règle pour la surface des rivières et des
+lacs. Le bloc du dessus est limité à `[min_y + 1, max_y − 1]`. L'étape logue les colonnes limitées : les fonds marins
 sous le bas du monde (attendu : −64 par défaut, alors que l'océan descend à plusieurs
 centaines de mètres) et les sommets coupés en haut (à corriger avec
 `world.vertical_exaggeration`).

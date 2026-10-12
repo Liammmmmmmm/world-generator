@@ -92,7 +92,7 @@ profondeur = max(1 m, river_depth_ratio × largeur)
   cellules sèches seulement (une bande s'arrête à la mer et aux lacs). Sa surface est la plus
   basse des cellules du tracé qui la couvrent. Une source fait 1 bloc de large.
 - **Berges** : la surface de l'eau ne dépasse jamais le terrain d'une voisine sèche, ni le
-  niveau de la mer à côté d'elle. Il n'y a donc pas de mur d'eau ; là où le niveau baisse d'un
+  niveau de la mer à côté d'elle (elle arrive alors au ras de la mer). Il n'y a donc pas de mur d'eau ; là où le niveau baisse d'un
   bloc à l'autre, l'eau s'écoule en petite cascade, comme dans Minecraft.
 - **Lit** : le terrain est creusé `profondeur` sous la surface, et l'eau le remplit.
 
@@ -121,9 +121,10 @@ profondeur = max(1 m, river_depth_ratio × largeur)
 
 En 4096², sur une île volcanique et trois îles continentales (dont la seed 7) : **toutes les
 cellules de rivière sont reliées à l'océan** (au bord de la carte) par de l'eau, et **aucun
-bloc d'eau n'a d'air à côté de lui au-dessus d'un sol sec** (aucun mur d'eau). Il reste
-quelques centaines de cellules sèches à moins d'un mètre sous le niveau de la mer, au bord de
-l'eau : en blocs, leur sol est au niveau de la surface de la mer (des berges plates). Les mêmes vérifications sont dans les tests. Environ 4,4 s,
+bloc d'eau n'a d'air à côté de lui au-dessus d'un sol sec** (aucun mur d'eau). Les quelques
+cellules sèches restées sous le niveau de la mer au bord de l'eau (à moins d'un mètre, non
+reliées à l'océan) sont remontées au niveau de la mer : des berges au ras de l'eau, pas des
+trous. Les mêmes vérifications sont dans les tests. Environ 4,4 s,
 pour un pic mémoire de 1,1 Go sur toute la génération.
 
 ## 4. Limites connues

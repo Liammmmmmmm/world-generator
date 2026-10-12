@@ -256,6 +256,12 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
     }
     context.progress(0.7f);
 
+    // Dry ground left below sea level (a few cells along the shore, not
+    // connected to the ocean) is raised to it: flush with the sea, not a hole.
+    for (std::size_t k = 0; k < n; ++k)
+        if (static_cast<int>(kind.data()[k]) == layers::kDry && h.data()[k] < sea)
+            h.data()[k] = sea;
+
     // --- 4. Rivers: bands along the flow paths -------------------------------
     std::vector<float> level(n, kInfinity), depth(n, 0.0f);
     int sources = 0, riverCells = 0;
@@ -303,7 +309,7 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
             if (type == layers::kDry)
                 level[b] = std::min(level[b], h.data()[m]);
             else if (type == layers::kSea)
-                level[b] = std::min(level[b], sea - kEpsilonM);
+                level[b] = std::min(level[b], sea);
         }
     }
     for (std::size_t b = 0; b < n; ++b) {

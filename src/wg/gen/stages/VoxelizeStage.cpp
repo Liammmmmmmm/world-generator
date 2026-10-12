@@ -28,6 +28,11 @@ void VoxelizeStage::run(WorldState& world, const StageContext& context) {
     const double sea = info.seaLevelM();
     const double toBlocks = p.world.verticalExaggeration / info.blockSizeM; // vertical meters -> blocks
     const auto blockY = [&](double altitudeM) { return info.seaLevel + (altitudeM - sea) * toBlocks; };
+    // The top block of a surface (ground or water) at an altitude: the one
+    // whose top face is at floor(altitude), like the sea, whose top block
+    // (sea_level_y - 1) has its top face at sea level. A ground between 0 and
+    // 1 m is flush with the sea, not one block above it.
+    const auto topBlock = [&](double y) { return std::floor(y) - 1.0; };
     long belowWorld = 0, aboveWorld = 0; // columns clipped to the world height
     const auto clampY = [&](double y) {
         belowWorld += y < info.minY + 1;
@@ -43,16 +48,16 @@ void VoxelizeStage::run(WorldState& world, const StageContext& context) {
         int ground, water;
     };
     const auto columnAt = [&](int x, int z) {
-        Column c{clampY(groundAt(x, z)), 0};
+        Column c{clampY(topBlock(groundAt(x, z))), 0};
         c.water = c.ground;
         if (kind && water) {
             const auto type = static_cast<int>(kind->at(x, z));
             if (type == layers::kLake || type == layers::kRiver)
-                c.water = std::max(c.ground, static_cast<int>(std::floor(blockY(water->at(x, z)))));
+                c.water = std::max(c.ground, static_cast<int>(topBlock(blockY(water->at(x, z)))));
         }
         // The sea: as found by the hydrology (connected to the ocean), else
         // everything below sea level.
-        const bool sea = kind ? static_cast<int>(kind->at(x, z)) == layers::kSea : c.ground < info.seaLevel;
+        const bool sea = kind ? static_cast<int>(kind->at(x, z)) == layers::kSea : c.ground < info.seaLevel - 1;
         if (sea)
             c.water = std::max(c.water, info.seaLevel - 1);
         return c;

@@ -786,7 +786,8 @@ void testVoxelize() {
     CHECK(voxels.get(3, info.minY, 3) == wg::Block::Bedrock);
     CHECK(voxels.get(3, info.seaLevel - 1, 3) == wg::Block::Water && voxels.get(3, info.seaLevel, 3) == wg::Block::Air);
 
-    // One column per cell of h: the ground is floor(h) on dry land.
+    // One column per cell of h: on dry land, the top face of the ground is at
+    // floor(h) (its top block one below), like the sea's at sea level.
     const auto& h = state.layer(wg::layers::kHeight);
     const auto& kind = state.layer(wg::layers::kWater);
     int counts[static_cast<int>(wg::Block::Count)] = {};
@@ -796,7 +797,7 @@ void testVoxelize() {
             const int top = voxels.topNonAir(x, z);
             ++counts[static_cast<int>(voxels.get(x, top, z))];
             if (static_cast<int>(kind.at(x, z)) == wg::layers::kDry && h.at(x, z) > info.minY + 1)
-                groundMatches = groundMatches && top == static_cast<int>(std::floor(h.at(x, z) / info.blockSizeM));
+                groundMatches = groundMatches && top == static_cast<int>(std::floor(h.at(x, z) / info.blockSizeM)) - 1;
         }
     }
     CHECK(groundMatches);
