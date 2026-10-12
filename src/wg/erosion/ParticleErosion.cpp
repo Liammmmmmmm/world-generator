@@ -52,7 +52,9 @@ void ParticleErosion::step(int index) {
     for (std::size_t k = 0; k < map_.size(); ++k) {
         ErosionCell& cell = map_[k];
         cell.discharge = (1.0f - rate) * cell.discharge + rate * cell.dischargeTrack;
-        cell.dischargeTrack = 0.0f;
+        cell.momentumX = (1.0f - rate) * cell.momentumX + rate * cell.momentumXTrack;
+        cell.momentumY = (1.0f - rate) * cell.momentumY + rate * cell.momentumYTrack;
+        cell.dischargeTrack = cell.momentumXTrack = cell.momentumYTrack = 0.0f;
     }
 }
 

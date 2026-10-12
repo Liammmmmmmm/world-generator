@@ -67,6 +67,7 @@ Rgb materialColor(std::string_view name);
 //   Diverging:   blue (negative) / white (0) / red (positive), each sign scaled
 //                to its own extent
 //   Categorical: one color per category (materials get materialColor)
+//   Direction:   hue of the angle (renderLayer also darkens by the intensity layer)
 class LayerPalette {
 public:
     LayerPalette(const Grid2D<float>& layer, const LayerMeta& meta, ColorMap colorMap, double seaLevelM);
@@ -80,6 +81,9 @@ private:
     double seaLevelM_;
     std::vector<Rgb> categories_;
 };
+
+// Color of a direction (angle in radians, atan2(y, x)): a smooth hue wheel.
+Rgb directionColor(float angle);
 
 // Lambert shading factor (~1 on flat ground) from a heightmap, light from the
 // NW. `cellSize` is the horizontal size of a cell, in the unit of the heights.

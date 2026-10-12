@@ -12,11 +12,13 @@ enum class LayerStyle : std::uint8_t {
     Height,      // elevation in meters: hypsometric colors, hillshade, sea below sea level
     Diverging,   // signed value centered on 0 (blue negative, red positive)
     Categorical, // integer ids indexing `categories`
+    Direction,   // angle in radians (atan2(y, x)) shown as a hue; `categories[0]`, if
+                 // any, names a layer of the same size giving the intensity (a norm)
 };
 
 struct LayerMeta {
     LayerStyle style = LayerStyle::Scalar;
-    std::vector<std::string> categories; // labels of the ids, for Categorical
+    std::vector<std::string> categories; // labels of the ids (Categorical), intensity layer (Direction)
 };
 
 } // namespace wg

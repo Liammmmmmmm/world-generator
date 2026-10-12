@@ -34,7 +34,9 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
     Grid2D<float>& sediment = world.createLayer(layers::kSediment, nx, ny, 0.0f, {LayerStyle::Scalar, {}});
     Grid2D<float>& discharge = world.createLayer(layers::kDischargeNorm, nx, ny, 0.0f, {LayerStyle::Scalar, {}});
     Grid2D<float>& eroded = world.createLayer(layers::kEroded, nx, ny, 0.0f, {LayerStyle::Diverging, {}});
-    Grid2D<float>& momentum = world.createLayer(layers::kMomentum, nx, ny, 0.0f, {LayerStyle::Scalar, {}});
+    Grid2D<float>& momentum = world.createLayer(layers::kMomentum, nx, ny, 0.0f,
+                                                {LayerStyle::Direction, {std::string(layers::kMomentumNorm)}});
+    Grid2D<float>& momentumNorm = world.createLayer(layers::kMomentumNorm, nx, ny, 0.0f, {LayerStyle::Scalar, {}});
     Grid2D<float>& surfaceMaterial = world.editLayer(layers::kSurfaceMaterial);
 
     // To the normalized frame: cells 1 unit wide, heights in height_scale_m
@@ -65,7 +67,8 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
                 sediment.at(i, j) = static_cast<float>(cell.sediment * scale);
                 discharge.at(i, j) = std::erf(static_cast<float>(params.dischargeScale) * cell.discharge);
                 eroded.at(i, j) = hInitial.at(i, j) - h.at(i, j);
-                momentum.at(i, j) = std::hypot(cell.momentumX, cell.momentumY);
+                momentum.at(i, j) = std::atan2(cell.momentumY, cell.momentumX);
+                momentumNorm.at(i, j) = std::hypot(cell.momentumX, cell.momentumY);
                 surfaceMaterial.at(i, j) = static_cast<float>(rock.material(i, j, cell));
             }
         }
@@ -79,6 +82,7 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
     erosion::ParticleErosionParams settings;
     settings.drop = {params.maxAge,
                      static_cast<float>(params.gravity),
+                     static_cast<float>(params.momentumTransfer),
                      static_cast<float>(params.entrainment),
                      static_cast<float>(params.depositionRate),
                      static_cast<float>(params.evaporationRate),
@@ -112,9 +116,12 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
     }
     publish();
 
-    for (float value : h.data())
-        if (!std::isfinite(value))
-            throw WorldError("non-finite altitude produced by the erosion");
+    for (std::size_t k = 0; k < map.size(); ++k) {
+        const erosion::ErosionCell& c = map[k];
+        if (!std::isfinite(c.height) || !std::isfinite(c.discharge) || !std::isfinite(c.momentumX) ||
+            !std::isfinite(c.momentumY))
+            throw WorldError("non-finite value produced by the erosion");
+    }
 }
 
 } // namespace wg

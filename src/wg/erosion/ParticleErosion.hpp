@@ -15,7 +15,8 @@ struct ParticleErosionParams {
 };
 
 // The erosion loop: each step spawns drops on random land cells and runs them
-// until they die, then blends what they tracked into the time-averaged maps.
+// until they die, then blends what they tracked into the time-averaged maps
+// (discharge and momentum, exponential moving averages).
 // Deterministic: the drops of step k come from a random stream derived from
 // (seed, k), whatever ran before.
 class ParticleErosion {

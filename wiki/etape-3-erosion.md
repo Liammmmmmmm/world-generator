@@ -11,8 +11,8 @@ les corrections de sa bibliothèque **soillib**. Principe : **peu de règles, si
 Code : [erosion/](../src/wg/erosion/) (grille, goutte, boucle des pas) et
 [ErosionStage.cpp](../src/wg/gen/stages/ErosionStage.cpp) (conversion des calques, suivi).
 
-**État :** jalons A (gouttes, transfert de masse, débit) et B (avalanche thermique,
-matériaux). À venir : élan et méandres (C), interaction avec la mer (D), performance (E), réglages
+**État :** jalons A (gouttes, transfert de masse, débit), B (avalanche thermique,
+matériaux) et C (élan). À venir : interaction avec la mer (D), performance (E), réglages
 par origine (F).
 
 ---
@@ -66,7 +66,8 @@ ce qui les atteint quitte le domaine.
 pour chaque goutte du pas : naître sur une cellule de terre au hasard, descendre jusqu'à la mort
 pour chaque cellule :
     discharge = (1 − discharge_lrate) · discharge + discharge_lrate · discharge_track
-    discharge_track = 0
+    momentum  = (1 − discharge_lrate) · momentum  + discharge_lrate · momentum_track
+    discharge_track = momentum_track = 0
 ```
 
 - **Nombre de gouttes** (`particles_per_step` null ou 0) : une pour 512 cellules de terre,
@@ -86,9 +87,19 @@ Volume 1, sédiment 0, vitesse nulle. À chaque itération, sur la cellule `floo
    `volume < min_volume` : elle dépose tout ce qu'elle porte sur cette cellule.
 2. **Gravité** : `g` le gradient de hauteur (différences centrées, décentrées au bord),
    `n = normalize(−g.x, 1, −g.y)`, `speed += gravity · (n.x, n.z) / volume`.
+   **Élan** : le courant moyen de la cellule (`momentum`) entraîne la goutte, d'autant plus
+   qu'ils vont déjà dans le même sens :
+   ```
+   si |momentum| > 1e−6 et |speed| > 0 :
+       speed += momentum_transfer · dot(n̂(momentum), n̂(speed)) / (volume + discharge) · momentum
+   ```
+   Le seuil écarte les cellules où le courant s'est éteint : sa moyenne décroît jusqu'aux
+   float dénormalisés, où le produit des normes tombait à 0 et la division semait des NaN
+   (après environ 1500 pas).
 3. **Pas de temps dynamique** : `speed` est ramenée à la norme √2. La goutte avance donc
    d'environ une cellule et n'en saute jamais. Une vitesse nulle la tue (dépôt sur place).
-4. **Débit** : `discharge_track += volume` sur la cellule courante.
+4. **Débit et élan** : `discharge_track += volume` et `momentum_track += volume · speed` sur
+   la cellule courante.
 5. **Déplacement** : `pos += speed`. Hors de la grille ou sur une cellule `FIXED`, la goutte
    meurt et son sédiment est **perdu** (compté dans le bilan).
 6. **Transfert de masse** sur la cellule quittée :
@@ -156,7 +167,8 @@ des float.
 | `sediment` | épaisseur de sédiments meubles (m) |
 | `discharge_norm` | `erf(discharge_scale · discharge)`, dans [0, 1) : le réseau hydrographique |
 | `eroded` | `h_initial − h` (m) : rouge = érosion, bleu = dépôt |
-| `momentum` | norme de l'élan moyen de l'eau (jalon C, vide pour l'instant) |
+| `momentum` | direction de l'élan moyen de l'eau (radians), style `Direction` : teinte = direction, intensité = norme |
+| `momentum_norm` | norme de l'élan moyen |
 | `surface_material` | matériau de la roche à nu (sous les sédiments), mis à jour |
 
 ## 5. Suivi dans le viewer
@@ -205,3 +217,15 @@ taux normal : la roche à nu, là où la dureté joue, est rarement atteinte. Ni
 fort, ni une avalanche freinée par l'érodabilité, ni des montagnes deux fois moins hautes,
 ni 4000 pas n'y changent quelque chose. La seule différence entre roches vient de leurs
 angles de talus.
+
+## 8. Jalon C : élan
+
+- **Rivières cohérentes** : avec l'élan, les rivières traversent les plateaux d'un seul
+  tenant au lieu de s'étaler, et le réseau se hiérarchise nettement.
+- **Méandres** : les rivières ondulent et leur tracé migre au fil des pas, mais **sans
+  boucles franches ni bras morts** sur nos îles. Elles n'ont pas de vraie plaine alluviale :
+  même les plateaux volcaniques gardent quelques degrés de pente. `gravity` règle
+  l'équilibre : à 3, les rivières sont plus sinueuses ; à 0,3, elles sont très lisses et
+  suivent le courant. `momentum_transfer = 3` change peu.
+- **Coût** : nul, voire négatif (les gouttes atteignent la mer plus vite) : 13 à 15 ms par
+  pas avec l'élan contre 17 à 19 ms sans, mesurés côte à côte sur une machine chargée.

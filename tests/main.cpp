@@ -10,6 +10,7 @@
 #include "wg/core/Random.hpp"
 #include "wg/core/WorldState.hpp"
 #include "wg/erosion/Avalanche.hpp"
+#include "wg/erosion/Drop.hpp"
 #include "wg/erosion/Rock.hpp"
 #include "wg/gen/Pipeline.hpp"
 #include "wg/gen/StageRegistry.hpp"
@@ -730,6 +731,33 @@ void testAvalanche() {
     CHECK(map.at(7, 7).height < 10.0f && map.at(7, 7).sediment == 0.0f && map.at(7, 9).sediment > 0.0f);
 }
 
+void testDropOnFadingFlow() {
+    // The averaged flow decays towards denormal floats where nothing flows any
+    // more: a drop crossing such cells must stay finite (it used to divide by
+    // an underflowed product and spread NaNs into the momentum map).
+    const auto params = wg::WorldConfig::fromJson({{"seed", 1}}).island();
+    const wg::Geology geology(params);
+    const int n = 32;
+    const wg::erosion::Rock rock(geology, params.geology.materials, {n, n, 1.0, 1.0, 0.0}, 1.0, 33.0);
+    wg::erosion::ErosionMap map(n, n);
+    for (int j = 0; j < n; ++j) {
+        for (int i = 0; i < n; ++i) {
+            auto& cell = map.at(i, j);
+            cell.height = 10.0f - 0.0001f * static_cast<float>(i); // nearly flat
+            cell.momentumX = 1e-43f, cell.momentumY = -4e-44f, cell.discharge = 1e-43f;
+        }
+    }
+    wg::erosion::DropParams drop;
+    drop.rock = &rock;
+    drop.thermalRate = 0.8f;
+    wg::erosion::descend(map, drop, 5.5f, 16.5f);
+    bool finite = true;
+    for (std::size_t k = 0; k < map.size(); ++k)
+        finite = finite && std::isfinite(map[k].momentumXTrack) && std::isfinite(map[k].momentumYTrack) &&
+                 std::isfinite(map[k].height);
+    CHECK(finite);
+}
+
 void testStepGate() {
     // A gate asking for every step gets one preview per step, in order.
     std::vector<int> steps;
@@ -820,6 +848,7 @@ int main() {
     testGeologyFolds();
     testErosion();
     testAvalanche();
+    testDropOnFadingFlow();
     testStepGate();
     testVoxelVolume();
     testWorldFileRoundTrip();

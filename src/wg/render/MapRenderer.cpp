@@ -149,6 +149,7 @@ Rgb LayerPalette::color(float value) const {
         const auto id = static_cast<std::size_t>(std::max(0.0f, std::round(value)));
         return id < categories_.size() ? categories_[id] : materialColor(std::to_string(id));
     }
+    case LayerStyle::Direction: return directionColor(value);
     default: {
         const float span = range_.max - range_.min;
         const float t = span > 0.0f ? std::clamp((value - range_.min) / span, 0.0f, 1.0f) : 0.5f;
@@ -156,6 +157,15 @@ Rgb LayerPalette::color(float value) const {
         return {gray, gray, gray};
     }
     }
+}
+
+Rgb directionColor(float angle) {
+    // Hue wheel from three phase-shifted cosines: smooth, no seam at ±pi.
+    const auto channel = [&](float phase) {
+        return static_cast<std::uint8_t>(std::lround(127.5f + 127.5f * std::cos(angle - phase)));
+    };
+    constexpr float kThird = 2.0943951f; // 2 pi / 3
+    return {channel(0.0f), channel(kThird), channel(-kThird)};
 }
 
 float hillshade(const Grid2D<float>& heights, int x, int z, double cellSize) {
@@ -178,11 +188,26 @@ RgbaImage renderLayer(const WorldState& state, std::string_view name, ColorMap c
     const bool shade = colorMap == ColorMap::Auto && palette.shaded();
     const double cell = cellSizeM(state, layer);
     const float sea = static_cast<float>(state.info().seaLevelM());
+    // Direction layers: darker where the intensity layer is weak (square root,
+    // so that faint flows stay visible).
+    const LayerMeta& meta = state.layerMeta(name);
+    const Grid2D<float>* intensity = nullptr;
+    float maxIntensity = 0.0f;
+    if (colorMap == ColorMap::Auto && meta.style == LayerStyle::Direction && !meta.categories.empty() &&
+        state.hasLayer(meta.categories[0])) {
+        intensity = &state.layer(meta.categories[0]);
+        if (intensity->width() != layer.width() || intensity->length() != layer.length())
+            intensity = nullptr;
+        else
+            maxIntensity = valueRange(*intensity).max;
+    }
 
     RgbaImage image = makeImage(layer.width(), layer.length());
     for (int z = 0; z < layer.length(); ++z) {
         for (int x = 0; x < layer.width(); ++x) {
             Rgb color = palette.color(layer.at(x, z));
+            if (intensity)
+                color = scale(color, maxIntensity > 0.0f ? std::sqrt(intensity->at(x, z) / maxIntensity) : 0.0f);
             if (shade) // full relief shading on land, a hint of it under water to show the bathymetry
                 color = scale(color, layer.at(x, z) > sea ? hillshade(layer, x, z, cell)
                                                           : 0.5f + 0.5f * hillshade(layer, x, z, cell));
