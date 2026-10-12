@@ -1,10 +1,10 @@
-# Étape 6 : voxelisation (`voxelize`) et export Minecraft
+# Étape 7 : voxelisation (`voxelize`) et export Minecraft
 
 Transformer la carte de hauteurs en blocs, puis écrire le monde au format Minecraft. Une
 première version volontairement simple : peu de matériaux, pas encore de végétation ni de
 grottes (des étapes viendront s'intercaler avant celle-ci).
 
-← [Étape 4 : hydrologie](etape-4-hydrologie.md) · [Vue d'ensemble](README.md)
+← [Étape 5 : hydrologie](etape-5-hydrologie.md) · [Vue d'ensemble](README.md)
 
 Code : [VoxelizeStage.cpp](../src/wg/gen/stages/VoxelizeStage.cpp),
 [MinecraftExport.cpp](../src/wg/io/MinecraftExport.cpp), [Nbt.cpp](../src/wg/io/Nbt.cpp),
@@ -16,11 +16,8 @@ Code : [VoxelizeStage.cpp](../src/wg/gen/stages/VoxelizeStage.cpp),
 
 ### Hauteur de chaque colonne
 
-La grille de simulation (1024² par défaut) est plus grossière que les blocs (4096² sur une
-carte de 4096 blocs). Chaque colonne de blocs prend la hauteur `h` interpolée en **bicubique
-(Catmull-Rom)** à son centre (`sampleCubic` dans [Grid2D.hpp](../src/wg/core/Grid2D.hpp)) :
-le relief reste lisse, sans les facettes d'une interpolation bilinéaire, et passe par les
-valeurs de la grille.
+`h` est déjà à la résolution des blocs ([étape 4, upscale](etape-5-hydrologie.md#2-upscale-étape-4)) :
+une colonne par cellule, sans interpolation.
 
 ```
 y_surface = floor(sea_level_y + (h − niveau de la mer) / block_size_m × vertical_exaggeration)
@@ -39,20 +36,18 @@ centaines de mètres) et les sommets coupés en haut (à corriger avec
 | sous la surface | stone |
 | surface en pente douce (≤ `grass_max_slope_deg`, 40°) | grass, sur `dirt_depth_blocks` (3) de dirt ; dirt sous l'eau |
 | surface en pente forte | stone |
-| rivières de l'hydrologie | lit creusé (dirt), rempli d'eau jusqu'à la surface de la rivière (voir l'[étape 4](etape-4-hydrologie.md#3-aux-blocs)) |
-| lacs | dirt au fond, eau jusqu'au niveau du lac |
+| rivières et lacs (`water`) | dirt au fond, eau jusqu'à `water_surface` (voir l'[étape 5](etape-5-hydrologie.md)) |
 | entre le fond et le niveau de la mer | water |
 
-La pente est mesurée sur les hauteurs interpolées, en blocs par bloc.
+La pente est mesurée sur `h`, en blocs par bloc.
 
 ### Mémoire
 
 Le volume est découpé en sections de 16³ ; une section d'un seul bloc ne coûte rien. Pour
 chaque colonne de 16 × 16, tout ce qui est sous la plus basse surface (moins la terre) est
 rempli d'un coup en sections uniformes de stone ; seules les sections qui traversent la
-surface sont détaillées. Une carte de 4096² se voxelise en environ 2 s, pour un pic mémoire
-d'environ 1 Go sur toute la génération. Le `.wgw` stocke les sections détaillées sans
-compression : environ 450 Mo.
+surface sont détaillées. Une carte de 4096² se voxelise en environ 1,8 s. Le `.wgw` stocke
+les sections détaillées sans compression.
 
 ## 2. Export Minecraft (`wmc`, `wgen --minecraft`)
 

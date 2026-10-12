@@ -41,13 +41,16 @@ void generate(const GalleryOptions& options, const nlohmann::json& raw, Job& job
         config["origin"]["type"] = job.origin;
     if (options.resolution)
         config["simulation"]["resolution"] = *options.resolution;
-    // Thumbnails only need the heights: skip the voxelization (memory and
-    // time, times the islands generated in parallel).
+    // Thumbnails only need the eroded heights: stop after the erosion (the
+    // following stages work at the block resolution: memory and time, times
+    // the islands generated in parallel).
     if (!config.contains("pipeline")) {
         config["pipeline"] = nlohmann::json::array();
-        for (const auto& type : wg::StageRegistry::defaultPipeline())
-            if (type != "voxelize")
-                config["pipeline"].push_back({{"type", type}});
+        for (const auto& type : wg::StageRegistry::defaultPipeline()) {
+            config["pipeline"].push_back({{"type", type}});
+            if (type == "erosion")
+                break;
+        }
     }
 
     const auto loaded = wg::WorldConfig::fromJson(config);

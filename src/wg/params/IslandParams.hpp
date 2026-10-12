@@ -211,7 +211,7 @@ struct IslandParams {
         } thermal;
     } erosion;
 
-    // Rivers and lakes on the eroded terrain (step 4).
+    // Rivers and lakes on the final terrain, at the block resolution (step 5).
     struct Hydrology {
         bool enabled = true;
         double riverMinAreaM2 = 0.0;   // drained area where a river starts (its source)
@@ -220,9 +220,11 @@ struct IslandParams {
         double riverDepthRatio = 0.0;  // depth = ratio * width, at least 1 m
         double lakeMinDepthM = 0.0;
         double lakeMinAreaM2 = 0.0;
+        double breachMaxDepthM = 0.0;  // depressions drained by a cut at most this deep...
+        double breachMaxLengthM = 0.0; // ...and this long; deeper ones are filled (lakes)
     } hydrology;
 
-    // Conversion of the heightmap to blocks (step 6).
+    // Conversion of the heightmap to blocks (step 7).
     struct Voxelization {
         bool enabled = true;
         int dirtDepthBlocks = 0;       // dirt under the grass on gentle slopes

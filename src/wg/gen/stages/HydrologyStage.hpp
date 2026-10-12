@@ -5,18 +5,25 @@
 
 namespace wg {
 
-// Step 4: rivers and lakes on the eroded terrain (hydrology.*), on the
-// simulation grid:
-//   1. depressions are filled (Priority-Flood, Barnes et al. 2014, with a
-//      tiny slope so that water always has a way out): the water surface,
-//      whose excess over the ground makes the lakes;
-//   2. each cell drains to its steepest neighbor on that surface (D8), so
-//      water goes through the lakes and always reaches the sea;
-//   3. the drained area accumulates downstream (uniform rain for now);
-//   4. a river starts where the drained area passes hydrology.river_min_area_m2
-//      (its source, high in the mountains) and widens as its tributaries join.
-// Produces water_surface, lake_depth, drainage, river_width, river_depth and
-// the flow_direction byte layer, which the voxelization uses to draw them.
+// Step 5: rivers and lakes on the final terrain (hydrology.*), at the block
+// resolution (after the upscale):
+//   1. conditioning (Priority-Flood with hybrid breaching, Lindsay 2016):
+//      from the outlets (sea, map border) inwards, lowest first. A depression
+//      behind a small barrier (a sediment bar on the coast) is drained by a
+//      channel cut through it, at most breach_max_depth_m deep and
+//      breach_max_length_m long; deeper ones are filled: lakes. Every cell then
+//      has a strictly lower neighbor, down to the sea;
+//   2. flow to the steepest lower neighbor (D8, slightly jittered so that flat
+//      or even slopes do not give straight lines), drained area accumulated
+//      downstream (uniform rain for now);
+//   3. a river starts where the drained area passes river_min_area_m2 (its
+//      source, high up) and widens downstream (river_width_coeff * sqrt(area));
+//      it is drawn as a band of that width, its bed carved under its surface,
+//      its surface never above the lowest dry bank (no wall of water);
+//   4. lakes: filled depressions at least lake_min_depth_m deep, covering
+//      lake_min_area_m2, at the level of their lowest rim.
+// Modifies "h" (cut channels, river beds) and produces water_surface and
+// water (dry / sea / lake / river).
 class HydrologyStage final : public Stage {
 public:
     explicit HydrologyStage(StageParams&) {}

@@ -5,7 +5,7 @@
 
 namespace wg {
 
-// Step 5, after the hydrology. Does nothing yet.
+// Step 6, after the hydrology. Does nothing yet.
 // TODO: coastal cliffs.
 class PostprocessStage final : public Stage {
 public:

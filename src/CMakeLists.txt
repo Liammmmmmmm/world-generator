@@ -9,6 +9,7 @@ add_library(wg
   wg/gen/stages/BuiltinStages.cpp
   wg/gen/stages/ErosionStage.cpp
   wg/gen/stages/HydrologyStage.cpp
+  wg/gen/stages/UpscaleStage.cpp
   wg/gen/stages/VoxelizeStage.cpp
   wg/gen/stages/IslandInitStage.cpp
   wg/gen/stages/ParametersStage.cpp

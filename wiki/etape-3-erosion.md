@@ -6,7 +6,7 @@ la matière là où elles accélèrent et la déposent là où elles ralentissen
 Improvements and Meandering Rivers in Particle-Based Hydraulic Erosion Simulations »), avec
 les corrections de sa bibliothèque **soillib**. Principe : **peu de règles, simples**.
 
-← [Étape 2](etape-2-initialisation.md) · [Étape 4 : hydrologie](etape-4-hydrologie.md) · [Vue d'ensemble](README.md)
+← [Étape 2](etape-2-initialisation.md) · [Étapes 4 et 5 : upscale et hydrologie](etape-5-hydrologie.md) · [Vue d'ensemble](README.md)
 
 Code : [erosion/](../src/wg/erosion/) (grille, goutte, boucle des pas) et
 [ErosionStage.cpp](../src/wg/gen/stages/ErosionStage.cpp) (conversion des calques, suivi).

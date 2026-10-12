@@ -687,8 +687,9 @@ void testErosion() {
     wg::PipelineCallbacks callbacks;
     callbacks.onLog = [&](std::size_t, const std::string& message) { logs.push_back(message); };
     const auto snapshots = runErosion(nlohmann::json::object(), callbacks);
-    CHECK(snapshots.size() == 6 && snapshots[2].stageName == "erosion" && snapshots[3].stageName == "hydrology" &&
-          snapshots[4].stageName == "postprocess" && snapshots[5].stageName == "voxelize");
+    CHECK(snapshots.size() == 7 && snapshots[2].stageName == "erosion" && snapshots[3].stageName == "upscale" &&
+          snapshots[4].stageName == "hydrology" && snapshots[5].stageName == "postprocess" &&
+          snapshots[6].stageName == "voxelize");
     const auto& state = snapshots[2].state;
     CHECK(snapshots[2].step == 30 && snapshots[2].totalSteps == 30);
 
@@ -725,61 +726,58 @@ const nlohmann::json kSmallRivers = {{"hydrology", {{"river_min_area_m2", 4000}}
 
 void testHydrology() {
     const auto snapshots = runErosion(nlohmann::json::object(), {}, kSmallRivers);
-    const auto& state = snapshots[3].state;
+    CHECK(snapshots[3].stageName == "upscale" && snapshots[4].stageName == "hydrology");
+    const auto& state = snapshots[4].state;
+    const auto& info = state.info();
     const auto& h = state.layer(wg::layers::kHeight);
-    const auto& direction = state.byteLayer(wg::layers::kFlowDirection);
-    const auto& surface = state.layer(wg::layers::kWaterSurface);
-    const auto& lake = state.layer(wg::layers::kLakeDepth);
-    const auto& width = state.layer(wg::layers::kRiverWidth);
+    const auto& water = state.layer(wg::layers::kWaterSurface);
+    const auto& kind = state.layer(wg::layers::kWater);
+    CHECK(h.width() == info.width && h.length() == info.length); // upscaled to the blocks
     const int nx = h.width(), ny = h.length();
-    const float sea = static_cast<float>(state.info().seaLevelM());
+    const auto is = [&](int i, int j, wg::layers::WaterKind k) { return static_cast<int>(kind.at(i, j)) == k; };
 
-    // Every land cell drains to an outlet (the sea or the map border), always
-    // downhill on the water surface: no loops, no pits.
-    bool drains = true, downhill = true;
-    for (int j = 0; j < ny; j += 5) {
-        for (int i = 0; i < nx; i += 5) {
-            int ci = i, cj = j;
-            for (int steps = 0; direction.at(ci, cj) != wg::layers::kNoFlow; ++steps) {
-                const int d = direction.at(ci, cj);
-                const int ni = ci + wg::layers::kFlowDi[d], nj = cj + wg::layers::kFlowDj[d];
-                downhill = downhill && surface.at(ni, nj) < surface.at(ci, cj);
-                ci = ni, cj = nj;
-                if (steps > nx * ny) {
-                    drains = false;
-                    break;
-                }
+    // Every river reaches the sea: flood from the sea through rivers and lakes.
+    std::vector<char> reached(static_cast<std::size_t>(nx) * ny, 0);
+    std::vector<std::pair<int, int>> stack;
+    for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i)
+            if (is(i, j, wg::layers::kSea))
+                reached[j * nx + i] = 1, stack.push_back({i, j});
+    while (!stack.empty()) {
+        const auto [i, j] = stack.back();
+        stack.pop_back();
+        for (int dj = -1; dj <= 1; ++dj) {
+            for (int di = -1; di <= 1; ++di) {
+                const int ni = i + di, nj = j + dj;
+                if (ni < 0 || nj < 0 || ni >= nx || nj >= ny || reached[nj * nx + ni] ||
+                    !(is(ni, nj, wg::layers::kRiver) || is(ni, nj, wg::layers::kLake)))
+                    continue;
+                reached[nj * nx + ni] = 1;
+                stack.push_back({ni, nj});
             }
-            drains = drains && (h.at(ci, cj) < sea || ci == 0 || cj == 0 || ci == nx - 1 || cj == ny - 1);
         }
     }
-    CHECK(drains && downhill);
-    // The water surface never goes under the ground; lakes fill depressions.
-    bool above = true;
-    for (std::size_t k = 0; k < h.size(); ++k)
-        above = above && surface.data()[k] >= h.data()[k] && (lake.data()[k] == 0.0f || lake.data()[k] >= 0.5f);
-    CHECK(above);
-    // Rivers widen downstream: a river cell is at least as wide as any of its tributaries.
-    int rivers = 0;
-    bool widening = true;
-    for (int j = 0; j < ny; ++j) {
-        for (int i = 0; i < nx; ++i) {
-            if (width.at(i, j) <= 0.0f || direction.at(i, j) == wg::layers::kNoFlow)
+    int rivers = 0, cut = 0, narrow = 0;
+    bool consistent = true;
+    for (int j = 1; j < ny - 1; ++j) {
+        for (int i = 1; i < nx - 1; ++i) {
+            if (!is(i, j, wg::layers::kRiver))
                 continue;
             ++rivers;
-            const int d = direction.at(i, j);
-            const int ni = i + wg::layers::kFlowDi[d], nj = j + wg::layers::kFlowDj[d];
-            if (h.at(ni, nj) >= sea)
-                widening = widening && width.at(ni, nj) >= width.at(i, j);
+            cut += !reached[j * nx + i];
+            consistent = consistent && water.at(i, j) >= h.at(i, j) + 0.99f; // a bed under the surface
+            // A source stretch one block wide.
+            narrow += (!is(i - 1, j, wg::layers::kRiver) && !is(i + 1, j, wg::layers::kRiver)) ||
+                      (!is(i, j - 1, wg::layers::kRiver) && !is(i, j + 1, wg::layers::kRiver));
         }
     }
-    CHECK(rivers > 20 && widening);
+    CHECK(rivers > 100 && cut == 0 && consistent && narrow > 0);
 }
 
 void testVoxelize() {
     const auto snapshots = runErosion(nlohmann::json::object(), {}, kSmallRivers);
-    const auto& state = snapshots[5].state;
-    CHECK(state.hasVoxels() && snapshots[5].voxelsChanged);
+    const auto& state = snapshots[6].state;
+    CHECK(snapshots[6].stageName == "voxelize" && state.hasVoxels() && snapshots[6].voxelsChanged);
     const auto& voxels = state.voxels();
     const auto& info = state.info();
     CHECK(voxels.width() == info.width && voxels.length() == info.length);
@@ -788,33 +786,39 @@ void testVoxelize() {
     CHECK(voxels.get(3, info.minY, 3) == wg::Block::Bedrock);
     CHECK(voxels.get(3, info.seaLevel - 1, 3) == wg::Block::Water && voxels.get(3, info.seaLevel, 3) == wg::Block::Air);
 
-    // Land: the surface follows h (to the rounding and the bicubic
-    // interpolation), with grass, bare stone on steep slopes, and rivers.
+    // One column per cell of h: the ground is floor(h) on dry land.
     const auto& h = state.layer(wg::layers::kHeight);
+    const auto& kind = state.layer(wg::layers::kWater);
     int counts[static_cast<int>(wg::Block::Count)] = {};
-    int far = 0, land = 0;
-    for (int z = 0; z < info.length; z += 3) {
-        for (int x = 0; x < info.width; x += 3) {
+    bool groundMatches = true;
+    for (int z = 0; z < info.length; ++z) {
+        for (int x = 0; x < info.width; ++x) {
             const int top = voxels.topNonAir(x, z);
             ++counts[static_cast<int>(voxels.get(x, top, z))];
-            const double hm = wg::sampleCentered(h, (x + 0.5) * info.blockSizeM - info.widthM() / 2,
-                                                 (z + 0.5) * info.blockSizeM - info.lengthM() / 2, info.widthM(),
-                                                 info.lengthM());
-            if (hm > info.seaLevelM() + 1.0) {
-                ++land;
-                far += std::abs(top - (info.seaLevel + hm / info.blockSizeM)) > 3.0;
+            if (static_cast<int>(kind.at(x, z)) == wg::layers::kDry && h.at(x, z) > info.minY + 1)
+                groundMatches = groundMatches && top == static_cast<int>(std::floor(h.at(x, z) / info.blockSizeM));
+        }
+    }
+    CHECK(groundMatches);
+    CHECK(counts[static_cast<int>(wg::Block::Grass)] > 0 && counts[static_cast<int>(wg::Block::Stone)] > 0);
+
+    // Water above sea level (rivers), and no wall of water: a water block
+    // never has air beside it above dry ground (it may above lower water: a
+    // cascade).
+    int riverWater = 0, walls = 0;
+    for (int z = 1; z < info.length - 1; ++z) {
+        for (int x = 1; x < info.width - 1; ++x) {
+            const int top = voxels.topNonAir(x, z);
+            if (voxels.get(x, top, z) != wg::Block::Water)
+                continue;
+            riverWater += top >= info.seaLevel;
+            for (const auto [dx, dz] : {std::pair{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+                const int ntop = voxels.topNonAir(x + dx, z + dz);
+                walls += ntop < top && voxels.get(x + dx, ntop, z + dz) != wg::Block::Water;
             }
         }
     }
-    CHECK(land > 1000 && far < land / 50);
-    CHECK(counts[static_cast<int>(wg::Block::Grass)] > 0 && counts[static_cast<int>(wg::Block::Stone)] > 0);
-    CHECK(counts[static_cast<int>(wg::Block::Water)] > 0);
-    // Rivers above sea level: water on land.
-    int riverWater = 0;
-    for (int z = 0; z < info.length; ++z)
-        for (int x = 0; x < info.width; ++x)
-            riverWater += voxels.get(x, info.seaLevel + 2, z) == wg::Block::Water;
-    CHECK(riverWater > 0);
+    CHECK(riverWater > 0 && walls == 0);
 }
 
 void testNbt() {

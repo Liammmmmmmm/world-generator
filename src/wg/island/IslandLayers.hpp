@@ -3,12 +3,12 @@
 #include <cstdint>
 #include <string_view>
 
-// Names of the island state layers shared between stages, all on the
-// simulation grid (see IslandGrid). Heights are absolute altitudes in meters
+// Names of the island state layers shared between stages, on the simulation
+// grid (see IslandGrid) unless noted. Heights are absolute altitudes in meters
 // (sea level at WorldInfo::seaLevelM()).
 namespace wg::layers {
 
-inline constexpr std::string_view kHeight = "h";                 // altitude (m)
+inline constexpr std::string_view kHeight = "h";                 // altitude (m); at the block resolution after the upscale
 inline constexpr std::string_view kHeightInitial = "h_initial";  // h at the end of the initialization
 inline constexpr std::string_view kMask = "mask";                // land mask, [0, 1]
 inline constexpr std::string_view kCoastDist = "coast_dist";     // signed distance to the coast (m), > 0 on land
@@ -25,18 +25,13 @@ inline constexpr std::string_view kEroded = "eroded";                 // h_initi
 inline constexpr std::string_view kMomentum = "momentum";             // direction of the time-averaged water momentum (rad)
 inline constexpr std::string_view kMomentumNorm = "momentum_norm";    // its norm
 
-// Produced by the hydrology.
-inline constexpr std::string_view kWaterSurface = "water_surface"; // h with its depressions filled: lake levels (m)
-inline constexpr std::string_view kLakeDepth = "lake_depth";       // water depth of the lakes (m), 0 elsewhere
-inline constexpr std::string_view kDrainage = "drainage";          // log10 of the drained area (m²)
-inline constexpr std::string_view kRiverWidth = "river_width";     // river width (m), 0 where there is none
-inline constexpr std::string_view kRiverDepth = "river_depth";     // river depth (m)
-inline constexpr std::string_view kFlowDirection = "flow_direction"; // byte layer: D8 receiver (0..7), kNoFlow at outlets
-inline constexpr std::uint8_t kNoFlow = 255;
-// Cell offsets of the flow directions 0..7 (the receiver of (i, j) is
-// (i + kFlowDi[d], j + kFlowDj[d])).
-inline constexpr int kFlowDi[8] = {1, 1, 0, -1, -1, -1, 0, 1};
-inline constexpr int kFlowDj[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+// Produced by the hydrology, at the block resolution (like "h" after the upscale).
+inline constexpr std::string_view kWaterSurface = "water_surface"; // top of the water (m); the ground where dry
+inline constexpr std::string_view kWater = "water";                // kind of water of each cell (WaterKind)
+
+// Values of the "water" layer (categories, in this order).
+enum WaterKind : std::uint8_t { kDry = 0, kSea = 1, kLake = 2, kRiver = 3 };
+inline constexpr std::string_view kWaterKindNames[] = {"dry", "sea", "lake", "river"};
 
 enum CellFlags : std::uint8_t {
     kFixed = 1 << 0,  // boundary cell: height held at simulation.boundary_depth_m

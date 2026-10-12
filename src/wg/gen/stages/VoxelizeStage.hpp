@@ -5,15 +5,14 @@
 
 namespace wg {
 
-// Step 6: turns the heightmap into blocks, at the world's block resolution.
-// The heights of the simulation grid are upscaled by bicubic (Catmull-Rom)
-// interpolation; each column is then filled with simple materials:
+// Step 7: turns the heightmap into blocks. "h" is already at the block
+// resolution (upscale stage): one column per cell, filled with simple
+// materials:
 //   - bedrock at the bottom, stone below the surface;
 //   - gentle slopes: grass on a few blocks of dirt (dirt under water);
 //   - steep slopes (voxelization.grass_max_slope_deg): bare stone;
-//   - rivers of the hydrology: bands as wide as the river along each flow
-//     segment, the bed carved under the water surface; lakes filled up to
-//     their level; the sea up to sea level.
+//   - water: rivers and lakes up to their surface (hydrology), the sea up to
+//     sea level.
 // Heights are scaled by world.vertical_exaggeration and clamped to the world.
 class VoxelizeStage final : public Stage {
 public:

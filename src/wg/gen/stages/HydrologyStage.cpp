@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <queue>
 #include <string>
 #include <vector>
 
+#include "wg/core/Random.hpp"
 #include "wg/core/WorldState.hpp"
 #include "wg/island/IslandLayers.hpp"
 
@@ -14,146 +16,277 @@ namespace wg {
 
 namespace {
 
-// Rise of the filled surface from a cell to the next one flooded from it, so
-// that filled depressions still slope towards their outlet (m).
-constexpr double kFillSlopeM = 1e-4;
+// Rise of a flooded flat cell, and fall of a cell cut by a channel, from the
+// cell that reached it (m): the conditioned surface always slopes to the sea.
+constexpr float kEpsilonM = 1e-3f;
+// Relative jitter of the slopes when choosing where a cell flows.
+constexpr float kFlowJitter = 0.1f;
+
+// D8 neighbors; the direction opposite to d is (d + 4) % 8.
+constexpr int kDi[8] = {1, 1, 0, -1, -1, -1, 0, 1};
+constexpr int kDj[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+constexpr std::uint8_t kNone = 255;
+
+// Cell states during the flood.
+constexpr std::uint8_t kReached = 1;
+constexpr std::uint8_t kFilled = 2; // raised in a depression too deep to cut: a lake candidate
+
+constexpr float kInfinity = std::numeric_limits<float>::infinity();
 
 } // namespace
 
 void HydrologyStage::run(WorldState& world, const StageContext& context) {
     const auto& p = world.params().values.hydrology;
-    const Grid2D<float>& h = world.layer(layers::kHeight);
-    const Grid2D<std::uint8_t>& flags = world.byteLayer(layers::kFlags);
+    Grid2D<float>& h = world.editLayer(layers::kHeight);
     const int nx = h.width(), ny = h.length();
     const std::size_t n = static_cast<std::size_t>(nx) * ny;
     const double cellM = context.info.widthM() / nx;
-    const double cellArea = cellM * cellM;
-    const double sea = context.info.seaLevelM();
+    const float sea = static_cast<float>(context.info.seaLevelM());
 
-    Grid2D<float>& surface = world.createLayer(layers::kWaterSurface, nx, ny, 0.0f, {LayerStyle::Height, {}});
-    Grid2D<float>& lakeDepth = world.createLayer(layers::kLakeDepth, nx, ny, 0.0f, {LayerStyle::Scalar, {}});
-    Grid2D<float>& drainage = world.createLayer(layers::kDrainage, nx, ny, 0.0f, {LayerStyle::Scalar, {}});
-    Grid2D<float>& riverWidth = world.createLayer(layers::kRiverWidth, nx, ny, 0.0f, {LayerStyle::Scalar, {}});
-    Grid2D<float>& riverDepth = world.createLayer(layers::kRiverDepth, nx, ny, 0.0f, {LayerStyle::Scalar, {}});
-    Grid2D<std::uint8_t>& direction = world.createByteLayer(layers::kFlowDirection, nx, ny, layers::kNoFlow);
+    Grid2D<float>& water = world.createLayer(layers::kWaterSurface, nx, ny, 0.0f, {LayerStyle::Height, {}});
+    std::vector<std::string> kindNames(std::begin(layers::kWaterKindNames), std::end(layers::kWaterKindNames));
+    Grid2D<float>& kind = world.createLayer(layers::kWater, nx, ny, layers::kDry, {LayerStyle::Categorical, kindNames});
+    for (std::size_t k = 0; k < n; ++k)
+        if (h.data()[k] < sea)
+            kind.data()[k] = layers::kSea;
+    const auto finish = [&] { // water surface: the sea level, a lake level (set), the ground
+        for (std::size_t k = 0; k < n; ++k) {
+            const auto type = static_cast<int>(kind.data()[k]);
+            if (type == layers::kSea)
+                water.data()[k] = sea;
+            else if (type == layers::kDry)
+                water.data()[k] = h.data()[k];
+        }
+    };
     if (!p.enabled) {
-        surface = h;
+        finish();
         return;
     }
     const auto index = [&](int i, int j) { return static_cast<std::size_t>(j) * nx + i; };
+    const auto neighbor = [&](std::size_t k, int d, std::size_t& m) {
+        const int i = static_cast<int>(k % nx) + kDi[d], j = static_cast<int>(k / nx) + kDj[d];
+        if (i < 0 || j < 0 || i >= nx || j >= ny)
+            return false;
+        m = index(i, j);
+        return true;
+    };
 
-    // --- 1. Priority-Flood: from the outlets (the sea and the map border)
-    // inwards, lowest first; a cell flooded from a lower one is raised to it
-    // (plus a tiny slope). `order` lists the cells from the lowest surface up.
-    std::vector<double> filled(n);
-    std::vector<char> outlet(n, 0), done(n, 0);
-    std::vector<std::size_t> order;
-    order.reserve(n);
-    using Entry = std::pair<double, std::size_t>;
+    // --- 1. Conditioning: Priority-Flood with hybrid breaching --------------
+    std::vector<float> elev(h.data().begin(), h.data().end());
+    std::vector<std::uint8_t> parent(n, kNone); // direction to the cell the flood came from
+    std::vector<std::uint8_t> state(n, 0);
+    using Entry = std::pair<float, std::uint32_t>;
     std::priority_queue<Entry, std::vector<Entry>, std::greater<>> queue;
     for (int j = 0; j < ny; ++j) {
         for (int i = 0; i < nx; ++i) {
             const std::size_t k = index(i, j);
-            if (h.at(i, j) < sea || (flags.at(i, j) & layers::kFixed)) {
-                outlet[k] = done[k] = 1;
-                filled[k] = h.at(i, j);
-                queue.push({filled[k], k});
+            if (h.data()[k] < sea || i == 0 || j == 0 || i == nx - 1 || j == ny - 1) {
+                state[k] = kReached;
+                queue.push({elev[k], static_cast<std::uint32_t>(k)});
             }
         }
     }
+    const int maxCutCells = static_cast<int>(p.breachMaxLengthM / cellM);
+    // Cuts a channel from `from` along the flood path down to a cell lower
+    // than `level`, each cell kEpsilonM below the previous one, if it stays
+    // within the limits and does not go through a lake. Returns whether it did.
+    const auto breach = [&](std::size_t from, float level) {
+        int cells = 0;
+        float target = level;
+        for (std::size_t k = from; elev[k] >= target;) {
+            if ((state[k] & kFilled) || parent[k] == kNone)
+                return false;
+            target -= kEpsilonM;
+            if (elev[k] - target > p.breachMaxDepthM || ++cells > maxCutCells)
+                return false;
+            neighbor(k, parent[k], k);
+        }
+        target = level;
+        for (std::size_t k = from; elev[k] >= target;) {
+            target -= kEpsilonM;
+            elev[k] = target;
+            neighbor(k, parent[k], k);
+        }
+        return true;
+    };
+    int breached = 0;
     while (!queue.empty()) {
-        const std::size_t k = queue.top().second;
+        const std::size_t c = queue.top().second;
         queue.pop();
-        order.push_back(k);
-        const int i = static_cast<int>(k % nx), j = static_cast<int>(k / nx);
         for (int d = 0; d < 8; ++d) {
-            const int ni = i + layers::kFlowDi[d], nj = j + layers::kFlowDj[d];
-            if (ni < 0 || nj < 0 || ni >= nx || nj >= ny || done[index(ni, nj)])
+            std::size_t m;
+            if (!neighbor(c, d, m) || state[m])
                 continue;
-            const std::size_t m = index(ni, nj);
-            done[m] = 1;
-            filled[m] = std::max(static_cast<double>(h.at(ni, nj)), filled[k] + kFillSlopeM);
-            queue.push({filled[m], m});
+            state[m] = kReached;
+            parent[m] = static_cast<std::uint8_t>((d + 4) % 8);
+            if (elev[m] < elev[c] - kEpsilonM) { // in a depression: cut through, or fill
+                if (!(state[c] & kFilled) && breach(c, elev[m])) {
+                    ++breached;
+                } else {
+                    elev[m] = elev[c] + kEpsilonM;
+                    state[m] |= kFilled;
+                }
+            } else if (elev[m] <= elev[c]) { // flat: a tiny slope to the outlet
+                elev[m] = elev[c] + kEpsilonM;
+            }
+            queue.push({elev[m], static_cast<std::uint32_t>(m)});
         }
     }
     context.progress(0.4f);
 
-    // --- 2. Flow directions: steepest descent on the filled surface (D8,
-    // slopes divided by the distance). The filling guarantees a lower
-    // neighbor to every cell that is not an outlet.
-    std::vector<std::int64_t> receiver(n, -1);
-    for (int j = 0; j < ny; ++j) {
-        for (int i = 0; i < nx; ++i) {
-            const std::size_t k = index(i, j);
-            if (outlet[k])
+    // --- 2. Flow and drained area ---------------------------------------------
+    // Receivers: the steepest lower neighbor, slopes jittered. Every cell
+    // but the outlets has one (its parent is lower).
+    std::vector<std::uint8_t>& receiver = parent; // reused
+    const std::uint64_t seed = context.seed;
+    for (std::size_t k = 0; k < n; ++k) {
+        if (parent[k] == kNone)
+            continue; // outlet
+        float steepest = 0.0f;
+        std::uint8_t best = parent[k];
+        for (int d = 0; d < 8; ++d) {
+            std::size_t m;
+            if (!neighbor(k, d, m) || elev[m] >= elev[k])
                 continue;
-            double steepest = 0.0;
-            for (int d = 0; d < 8; ++d) {
-                const int ni = i + layers::kFlowDi[d], nj = j + layers::kFlowDj[d];
-                if (ni < 0 || nj < 0 || ni >= nx || nj >= ny)
-                    continue;
-                const double slope = (filled[k] - filled[index(ni, nj)]) / ((d % 2) ? std::numbers::sqrt2 : 1.0);
-                if (slope > steepest) {
-                    steepest = slope;
-                    receiver[k] = static_cast<std::int64_t>(index(ni, nj));
-                    direction.at(i, j) = static_cast<std::uint8_t>(d);
-                }
-            }
+            std::uint64_t s = seed ^ (static_cast<std::uint64_t>(k) * 8 + static_cast<std::uint64_t>(d));
+            const float noise = static_cast<float>(splitmix64(s) >> 40) / static_cast<float>(1 << 24); // [0, 1)
+            const float slope = (elev[k] - elev[m]) / ((d % 2) ? std::numbers::sqrt2_v<float> : 1.0f) *
+                                (1.0f + kFlowJitter * (2.0f * noise - 1.0f));
+            if (slope > steepest)
+                steepest = slope, best = static_cast<std::uint8_t>(d);
         }
+        receiver[k] = best;
     }
-
-    // --- 3. Drained area, from the highest cells down (receivers are lower).
-    std::vector<double> area(n, cellArea);
-    for (auto it = order.rbegin(); it != order.rend(); ++it)
-        if (receiver[*it] >= 0)
-            area[static_cast<std::size_t>(receiver[*it])] += area[*it];
+    // Drained area, upstream first (topological order of the flow tree).
+    const float cellArea = static_cast<float>(cellM * cellM);
+    std::vector<float> area(n, cellArea);
+    std::vector<std::uint8_t> donors(n, 0);
+    for (std::size_t k = 0; k < n; ++k) {
+        std::size_t m;
+        if (receiver[k] != kNone && neighbor(k, receiver[k], m))
+            ++donors[m];
+    }
+    std::vector<std::uint32_t> ready;
+    for (std::size_t k = 0; k < n; ++k)
+        if (donors[k] == 0)
+            ready.push_back(static_cast<std::uint32_t>(k));
+    while (!ready.empty()) {
+        const std::size_t k = ready.back();
+        ready.pop_back();
+        std::size_t m;
+        if (receiver[k] == kNone || !neighbor(k, receiver[k], m))
+            continue;
+        area[m] += area[k];
+        if (--donors[m] == 0)
+            ready.push_back(static_cast<std::uint32_t>(m));
+    }
+    // Cut channels lower the ground.
+    for (std::size_t k = 0; k < n; ++k)
+        h.data()[k] = std::min(h.data()[k], elev[k]);
     context.progress(0.6f);
 
-    // --- 4. Lakes: connected cells under at least lake_min_depth_m of water,
-    // covering at least lake_min_area_m2.
+    // --- 3. Lakes: filled depressions, at the level of their lowest rim -------
     std::vector<char> seen(n, 0);
     int lakes = 0;
     for (std::size_t start = 0; start < n; ++start) {
-        if (seen[start] || outlet[start] || filled[start] - h.data()[start] < p.lakeMinDepthM)
+        if (seen[start] || !(state[start] & kFilled))
             continue;
         std::vector<std::size_t> component{start}, stack{start};
         seen[start] = 1;
+        float rim = kInfinity, deepest = 0.0f;
         while (!stack.empty()) {
             const std::size_t k = stack.back();
             stack.pop_back();
-            const int i = static_cast<int>(k % nx), j = static_cast<int>(k / nx);
-            for (int d = 0; d < 8; d += 2) { // 4-connected
-                const int ni = i + layers::kFlowDi[d], nj = j + layers::kFlowDj[d];
-                if (ni < 0 || nj < 0 || ni >= nx || nj >= ny)
+            for (int d = 0; d < 8; ++d) {
+                std::size_t m;
+                if (!neighbor(k, d, m))
                     continue;
-                const std::size_t m = index(ni, nj);
-                if (seen[m] || outlet[m] || filled[m] - h.data()[m] < p.lakeMinDepthM)
-                    continue;
-                seen[m] = 1;
-                component.push_back(m);
-                stack.push_back(m);
+                if (!(state[m] & kFilled)) {
+                    rim = std::min(rim, h.data()[m]);
+                } else if (!seen[m]) {
+                    seen[m] = 1;
+                    component.push_back(m);
+                    stack.push_back(m);
+                }
             }
         }
-        if (static_cast<double>(component.size()) * cellArea < p.lakeMinAreaM2)
+        std::size_t wet = 0;
+        for (std::size_t k : component) {
+            deepest = std::max(deepest, rim - h.data()[k]);
+            wet += h.data()[k] < rim;
+        }
+        if (deepest < p.lakeMinDepthM || static_cast<double>(wet) * cellArea < p.lakeMinAreaM2)
             continue;
         ++lakes;
-        for (std::size_t k : component)
-            lakeDepth.data()[k] = static_cast<float>(filled[k] - h.data()[k]);
+        for (std::size_t k : component) {
+            if (h.data()[k] < rim && static_cast<int>(kind.data()[k]) == layers::kDry) {
+                kind.data()[k] = layers::kLake;
+                water.data()[k] = rim;
+            }
+        }
     }
+    context.progress(0.7f);
 
-    // --- 5. Rivers, from their source down to the sea.
-    int riverCells = 0;
+    // --- 4. Rivers: bands along the flow paths -------------------------------
+    std::vector<float> level(n, kInfinity), depth(n, 0.0f);
+    int sources = 0, riverCells = 0;
     for (std::size_t k = 0; k < n; ++k) {
-        surface.data()[k] = static_cast<float>(filled[k]);
-        drainage.data()[k] = static_cast<float>(std::log10(area[k]));
-        if (outlet[k] || area[k] < p.riverMinAreaM2)
+        if (area[k] < p.riverMinAreaM2 || static_cast<int>(kind.data()[k]) != layers::kDry)
             continue;
-        const double width = std::max(p.riverMinWidthM, p.riverWidthCoeff * std::sqrt(area[k]));
-        riverWidth.data()[k] = static_cast<float>(width);
-        riverDepth.data()[k] = static_cast<float>(std::max(1.0, p.riverDepthRatio * width));
         ++riverCells;
+        const double width = std::max(p.riverMinWidthM, p.riverWidthCoeff * std::sqrt(area[k]));
+        const float bed = static_cast<float>(std::max(1.0, p.riverDepthRatio * width));
+        const double radius = width / cellM / 2.0; // in cells
+        const int reach = static_cast<int>(std::floor(radius));
+        const int i = static_cast<int>(k % nx), j = static_cast<int>(k / nx);
+        for (int dj = -reach; dj <= reach; ++dj) {
+            for (int di = -reach; di <= reach; ++di) {
+                if ((di != 0 || dj != 0) && std::hypot(di, dj) > radius)
+                    continue;
+                const int bi = i + di, bj = j + dj;
+                if (bi < 0 || bj < 0 || bi >= nx || bj >= ny)
+                    continue;
+                const std::size_t b = index(bi, bj);
+                if (static_cast<int>(kind.data()[b]) != layers::kDry)
+                    continue; // the band stops at the sea and the lakes (their own water)
+                level[b] = std::min(level[b], elev[k]);
+                depth[b] = std::max(depth[b], bed);
+            }
+        }
+        // A source: no upstream river cell flows into this one.
+        bool fed = false;
+        for (int d = 0; d < 8 && !fed; ++d) {
+            std::size_t m;
+            fed = neighbor(k, d, m) && area[m] >= p.riverMinAreaM2 && receiver[m] == (d + 4) % 8;
+        }
+        sources += !fed;
     }
-    context.log(std::to_string(lakes) + " lakes, " + std::to_string(riverCells) + " river cells");
+    // Banks: the surface never rises above a neighboring dry ground, nor
+    // above the sea it flows into (whose top block is just below sea level).
+    for (std::size_t b = 0; b < n; ++b) {
+        if (level[b] == kInfinity || static_cast<int>(kind.data()[b]) != layers::kDry)
+            continue;
+        for (int d = 0; d < 8; ++d) {
+            std::size_t m;
+            if (!neighbor(b, d, m) || level[m] != kInfinity)
+                continue;
+            const auto type = static_cast<int>(kind.data()[m]);
+            if (type == layers::kDry)
+                level[b] = std::min(level[b], h.data()[m]);
+            else if (type == layers::kSea)
+                level[b] = std::min(level[b], sea - kEpsilonM);
+        }
+    }
+    for (std::size_t b = 0; b < n; ++b) {
+        if (level[b] == kInfinity || static_cast<int>(kind.data()[b]) != layers::kDry)
+            continue;
+        h.data()[b] = std::min(h.data()[b], level[b] - depth[b]); // the bed
+        water.data()[b] = level[b];
+        kind.data()[b] = layers::kRiver;
+    }
+    finish();
+    context.log(std::to_string(sources) + " river sources, " + std::to_string(riverCells) + " river path cells, " +
+                std::to_string(lakes) + " lakes, " + std::to_string(breached) + " depressions drained by a cut");
     context.progress(1.0f);
 }
 

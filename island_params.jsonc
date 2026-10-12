@@ -197,19 +197,22 @@
     }
   },
 
-  // Étape 4 : rivières et lacs sur le relief érodé. Les dépressions sont remplies (lacs), l'eau suit la plus grande
-  // pente jusqu'à la mer, et une rivière naît là où l'aire drainée dépasse river_min_area_m2 (pluie uniforme pour l'instant).
+  // Étape 5 : rivières et lacs, sur le terrain agrandi aux blocs (étape 4, bicubique). Les dépressions sont creusées
+  // (petites barrières) ou remplies (lacs), l'eau suit la plus grande pente jusqu'à la mer, et une rivière naît là
+  // où l'aire drainée dépasse river_min_area_m2 (pluie uniforme pour l'instant).
   "hydrology": {
     "enabled": true,
     "river_min_area_m2": 15000,        // aire drainée à la source d'une rivière (plus petit : plus de rivières, plus haut)
     "river_width_coeff": 0.01,         // largeur = coeff * racine(aire drainée en m²) : 1 km² -> 10 m
-    "river_min_width_m": 2,
+    "river_min_width_m": 1,            // largeur des sources
     "river_depth_ratio": 0.15,         // profondeur = ratio * largeur, au moins 1 m
-    "lake_min_depth_m": 0.5,           // eau plus profonde que ça dans une dépression remplie : un lac
-    "lake_min_area_m2": 1000           // plus petit : pas de lac
+    "lake_min_depth_m": 1,             // une dépression remplie plus profonde que ça : un lac
+    "lake_min_area_m2": 1000,          // plus petit : pas de lac
+    "breach_max_depth_m": 3,           // une dépression est drainée par un chenal creusé au plus aussi profond...
+    "breach_max_length_m": 300         // ...et aussi long ; sinon elle est remplie (lac)
   },
 
-  // Étape 6 : carte de hauteurs -> blocs (hauteurs interpolées en bicubique, voir aussi world.vertical_exaggeration).
+  // Étape 7 : carte de hauteurs (déjà aux blocs) -> blocs (voir aussi world.vertical_exaggeration).
   "voxelization": {
     "enabled": true,
     "dirt_depth_blocks": 3,            // couches de dirt sous l'herbe, en pente douce

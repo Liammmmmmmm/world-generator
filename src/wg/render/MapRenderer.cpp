@@ -121,6 +121,9 @@ Rgb materialColor(std::string_view name) {
         {"basalt", {62, 62, 68}},       {"granite", {205, 172, 160}}, {"gneiss", {150, 138, 150}},
         {"schist", {108, 128, 116}},    {"limestone", {222, 216, 194}}, {"sandstone", {214, 170, 108}},
         {"shale", {96, 90, 78}},        {"tuff", {192, 160, 108}},
+        // water kinds (hydrology)
+        {"dry", {40, 40, 40}},          {"sea", {36, 64, 160}},      {"lake", {70, 140, 220}},
+        {"river", {120, 200, 255}},
     };
     if (const auto it = kKnown.find(name); it != kKnown.end())
         return it->second;

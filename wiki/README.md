@@ -10,8 +10,8 @@ notice d'utilisation (build, commandes, contrôles du viewer).
 | [Étape 1 : paramètres](etape-1-parametres.md) | Lecture de la config, tirage depuis la seed, overrides, validation |
 | [Étape 2 : initialisation de l'île](etape-2-initialisation.md) | Masque, bathymétrie, topographie, montagnes, géologie |
 | [Étape 3 : érosion](etape-3-erosion.md) | Érosion hydraulique par particules, repère normalisé, lecture pas à pas |
-| [Étape 4 : hydrologie](etape-4-hydrologie.md) | Rivières (sources, confluences) et lacs |
-| [Étape 6 : voxelisation et export Minecraft](etape-6-voxelisation.md) | Hauteurs → blocs, monde Minecraft Java (Anvil) |
+| [Étapes 4 et 5 : upscale et hydrologie](etape-5-hydrologie.md) | Terrain aux blocs, rivières (sources, confluences) et lacs |
+| [Étape 7 : voxelisation et export Minecraft](etape-7-voxelisation.md) | Hauteurs → blocs, monde Minecraft Java (Anvil) |
 
 ---
 
@@ -65,8 +65,8 @@ src/wg/                       bibliothèque "wg", sans dépendance au rendu
     StageParams    paramètres propres à une entrée du "pipeline" JSON (rarement utilisé)
     StageRegistry  "type" → fabrique d'étape, et pipeline par défaut
     Pipeline       construit et exécute les étapes, produit les snapshots, gère live/annulation
-    stages/        les étapes : ParametersStage, IslandInitStage, ErosionStage, HydrologyStage,
-                   PostprocessStage, VoxelizeStage, BuiltinStages.cpp (registre)
+    stages/        les étapes : ParametersStage, IslandInitStage, ErosionStage, UpscaleStage,
+                   HydrologyStage, PostprocessStage, VoxelizeStage, BuiltinStages.cpp (registre)
   island/
     IslandLayers   noms des calques de l'île et flags de cellule (contrat entre étapes)
     IslandGrid     géométrie de la grille de simulation (taille, cellule, coordonnées)
@@ -127,7 +127,7 @@ Une étape ([Stage.hpp](../src/wg/gen/Stage.hpp)) implémente
 Le viewer utilise ces changements pour afficher par défaut ce que l'étape a produit.
 
 Le **pipeline par défaut** est défini en code dans
-[BuiltinStages.cpp](../src/wg/gen/stages/BuiltinStages.cpp) (`parameters`, `island_init`, `erosion`, `hydrology`, `postprocess`, `voxelize`). Une
+[BuiltinStages.cpp](../src/wg/gen/stages/BuiltinStages.cpp) (`parameters`, `island_init`, `erosion`, `upscale`, `hydrology`, `postprocess`, `voxelize`). Une
 clé `"pipeline"` dans la config permet de le remplacer, par exemple pour tester une étape
 seule.
 
@@ -186,8 +186,8 @@ Le mode **galerie** (`--gallery sheet.png`, [Gallery.cpp](../apps/wgen/Gallery.c
 - `--resolution` réduit la grille pour aller plus vite ;
 - `--before-after` place chaque île avant et après l'érosion côte à côte.
 
-Les vignettes ne montrent que les hauteurs : la galerie saute l'étape `voxelize` (sauf si la
-config donne sa propre clé `pipeline`).
+Les vignettes ne montrent que les hauteurs érodées : la galerie s'arrête après l'érosion (sauf
+si la config donne sa propre clé `pipeline`).
 
 Le résultat est une planche PNG de vignettes en hillshade, légendées avec la seed et
 l'origine. Elle sert à juger d'un coup d'œil la variété des îles.
