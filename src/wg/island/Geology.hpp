@@ -32,8 +32,14 @@ public:
     // Vertical displacement of the strata by the folds at (x, y), in meters.
     double foldOffset(double x, double y) const;
 
-    // Material at (x, y, z).
+    // Material at (x, y, z): strataMaterial(z, strataAnchor(x, y)).
     int material(double x, double y, double z) const;
+
+    // Altitude from which the strata of column (x, y) are counted: the
+    // reference surface z_ref raised by the folds (the depth in the pile of a
+    // point at altitude z is anchor - z). Lets callers cache it per column.
+
+    double strataAnchor(double x, double y) const;
 
     // Strata only (no folds): material at depth zRef - zRock.
     int strataMaterial(double zRock, double zRef) const;

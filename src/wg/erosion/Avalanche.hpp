@@ -13,8 +13,8 @@ namespace wg::erosion {
 //     its thickness (a veneer of sand does not bring a cliff down);
 //   - its rock gives way beyond the talus of its material, above the sea only
 //     (no erosion under water).
-// A cell that receives matter is checked in turn, over a bounded number of
-// levels. FIXED cells take no part.
+// The cells that receive matter are checked in turn (breadth first, a bounded
+// number of cells). FIXED cells take no part.
 void avalanche(ErosionMap& map, const Rock& rock, float rate, int i, int j);
 
 } // namespace wg::erosion

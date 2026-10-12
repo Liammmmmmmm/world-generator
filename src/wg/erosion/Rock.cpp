@@ -21,13 +21,17 @@ Rock::Rock(const Geology& geology, const std::map<std::string, IslandParams::Mat
     sedimentTalus_ = slope(sedimentTalusAngleDeg);
     underwaterTalus_ = slope(underwaterTalusAngleDeg);
     minTalus_ = std::min({sedimentTalus_, underwaterTalus_, *std::min_element(talus_.begin(), talus_.end())});
+
+    anchor_.resize(static_cast<std::size_t>(frame.nx) * frame.ny);
+    for (int j = 0; j < frame.ny; ++j)
+        for (int i = 0; i < frame.nx; ++i)
+            anchor_[static_cast<std::size_t>(j) * frame.nx + i] =
+                geology.strataAnchor((i + 0.5 - frame.nx * 0.5) * frame.cellM, (j + 0.5 - frame.ny * 0.5) * frame.cellM);
 }
 
 int Rock::material(int i, int j, const ErosionCell& cell) const {
-    const double x = (i + 0.5 - frame_.nx * 0.5) * frame_.cellM;
-    const double y = (j + 0.5 - frame_.ny * 0.5) * frame_.cellM;
     const double rockTop = frame_.seaLevelM + (cell.height - cell.sediment) * frame_.heightScaleM;
-    return geology_.material(x, y, rockTop);
+    return geology_.strataMaterial(rockTop, anchor_[static_cast<std::size_t>(j) * frame_.nx + i]);
 }
 
 } // namespace wg::erosion

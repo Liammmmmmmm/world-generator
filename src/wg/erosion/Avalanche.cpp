@@ -8,9 +8,11 @@ namespace wg::erosion {
 
 namespace {
 
-// Levels of cascade below the modified cell. The references do not cascade;
-// a few levels let debris slide down to rest instead of perching on a slope.
-constexpr int kMaxDepth = 6;
+// Cells checked per avalanche, at most: the modified cell, then the cells it
+// sends matter to, in order (breadth first). Enough for debris to slide down
+// to rest, and bounded: a cascade on a slope steeper than every talus would
+// otherwise spread over the whole slope at each change.
+constexpr int kMaxCells = 24;
 
 struct Neighbor {
     int di, dj;
@@ -22,7 +24,11 @@ constexpr Neighbor kNeighbors[] = {
     {-1, 1, std::numbers::sqrt2_v<float>},  {0, 1, 1.0f},  {1, 1, std::numbers::sqrt2_v<float>},
 };
 
-void cascade(ErosionMap& map, const Rock& rock, float rate, int i, int j, int depth) {
+// Checks cell (i, j) against its 8 neighbors, moving the unstable part of
+// each height difference down. Calls `received(ni, nj)` for each neighbor that
+// received matter.
+template <typename Received>
+void relax(ErosionMap& map, const Rock& rock, float rate, int i, int j, Received&& received) {
     for (const Neighbor& n : kNeighbors) {
         const int ni = i + n.di, nj = j + n.dj;
         if (!map.inside(ni, nj) || map.fixed(ni, nj))
@@ -53,16 +59,32 @@ void cascade(ErosionMap& map, const Rock& rock, float rate, int i, int j, int de
         high.sediment = std::max(0.0f, high.sediment - transfer);
         low.height += transfer;
         low.sediment += transfer;
-        if (down && depth < kMaxDepth)
-            cascade(map, rock, rate, ni, nj, depth + 1);
+        if (down)
+            received(ni, nj);
     }
 }
 
 } // namespace
 
 void avalanche(ErosionMap& map, const Rock& rock, float rate, int i, int j) {
-    if (!map.fixed(i, j))
-        cascade(map, rock, rate, i, j, 0);
+    if (map.fixed(i, j))
+        return;
+    struct Cell {
+        int i, j;
+    };
+    Cell queue[kMaxCells];
+    int size = 0;
+    queue[size++] = {i, j};
+    for (int next = 0; next < size; ++next) {
+        relax(map, rock, rate, queue[next].i, queue[next].j, [&](int ni, int nj) {
+            if (size == kMaxCells)
+                return;
+            for (int k = next + 1; k < size; ++k)
+                if (queue[k].i == ni && queue[k].j == nj)
+                    return; // already waiting
+            queue[size++] = {ni, nj};
+        });
+    }
 }
 
 } // namespace wg::erosion

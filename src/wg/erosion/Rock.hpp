@@ -22,7 +22,8 @@ public:
         double seaLevelM = 0.0;
     };
 
-    // `geology` must outlive the Rock.
+    // `geology` must outlive the Rock. The strata anchor of every cell is
+    // computed once (lookups are then a search in the strata pile).
     Rock(const Geology& geology, const std::map<std::string, IslandParams::Material>& materials, const Frame& frame,
          double hardnessInfluence, double sedimentTalusAngleDeg, double underwaterTalusAngleDeg);
 
@@ -45,6 +46,7 @@ public:
 private:
     const Geology& geology_;
     Frame frame_;
+    std::vector<double> anchor_; // Geology::strataAnchor of each cell
     std::vector<float> erodibility_; // by material id
     std::vector<float> talus_;       // by material id
     float sedimentTalus_ = 0.0f;

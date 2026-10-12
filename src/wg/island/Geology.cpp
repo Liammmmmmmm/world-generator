@@ -67,9 +67,13 @@ int Geology::strataMaterial(double zRock, double zRef) const {
     return i < strata_.size() ? strata_[i] : basement_;
 }
 
-int Geology::material(double x, double y, double z) const {
+double Geology::strataAnchor(double x, double y) const {
     const double zRef = initialSurface_ ? sampleCentered(*initialSurface_, x, y, widthM_, lengthM_) : strataTop_;
-    return strataMaterial(z - foldOffset(x, y), zRef); // the strata move with the folds
+    return zRef + foldOffset(x, y); // the strata move with the folds
+}
+
+int Geology::material(double x, double y, double z) const {
+    return strataMaterial(z, strataAnchor(x, y));
 }
 
 } // namespace wg

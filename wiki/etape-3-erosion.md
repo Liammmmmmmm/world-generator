@@ -149,11 +149,15 @@ Deux talus par cellule haute :
   d'érosion sous l'eau).
 
 Le transfert est le plus grand des deux. La matière déplacée devient du **sédiment** chez la
-cellule basse. Une cellule qui reçoit est vérifiée à son tour,
-sur six niveaux au plus, pour que les débris glissent jusqu'au repos. Les cellules `FIXED` ne participent pas.
+cellule basse. Les cellules qui reçoivent sont vérifiées à leur tour, dans l'ordre (en largeur
+d'abord), 24 cellules au plus par avalanche : assez pour que les débris glissent jusqu'au
+repos, et borné. Une récursion sur plusieurs niveaux se ramifiait de façon exponentielle sur
+les pentes plus raides que tous les talus (95 % du temps sur une île continentale). Les cellules `FIXED` ne participent pas.
 
 **Talus de la roche** ([Rock.cpp](../src/wg/erosion/Rock.cpp)) : celui du matériau de sa
-surface, `geology.materials[material(x, y, h − sediment)]`. Converti dans le repère normalisé : `tan(angle) · cellM / height_scale_m`. Le plus petit talus de tous sert à
+surface, `geology.materials[material(x, y, h − sediment)]`. `Rock` précalcule pour chaque
+cellule l'ancrage des strates (`Geology::strataAnchor` : surface de référence + pli), et une
+consultation n'est plus qu'une recherche dans la pile. Converti dans le repère normalisé : `tan(angle) · cellM / height_scale_m`. Le plus petit talus de tous sert à
 écarter d'emblée les paires stables, sans consulter la géologie.
 
 On compare chaque paire, comme SimpleHydrology. soillib compare plutôt chaque voisin à la
