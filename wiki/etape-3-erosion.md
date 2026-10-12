@@ -278,7 +278,8 @@ précalculé :
 | volcanique (454 gouttes / pas) | 15,8 ms / pas | 13,5 ms / pas | 52 % | 39 % | 8 % |
 | continentale (107 gouttes / pas) | 16,3 ms / pas | 7,3 ms / pas | — | — | — |
 
-Un run de 1000 pas en 1024² prend donc 7 à 14 s.
+Un run de 1000 pas en 1024² prend donc 7 à 14 s ; avec les préréglages (section suivante),
+une île continentale prend de 30 à 40 s et une volcanique de 30 s à un peu plus d'une minute.
 
 **Pas de parallélisme, par choix** : le déterminisme prime. Les gouttes en parallèle avec
 écritures atomiques ne sont pas reproductibles ; les tuiles en damier demandent de passer
@@ -289,13 +290,13 @@ Le mode actuel est reproductible au bit près (flux aléatoire par pas, test dé
 
 ### Préréglages par origine
 
-`erosion.particles.steps` et `entrainment` ont une valeur par défaut selon l'origine (des
-défauts, pas des tirages : la config l'emporte toujours) :
+`erosion.particles.steps` est tiré de la seed dans une plage qui dépend de l'origine, et
+`entrainment` a une valeur par défaut selon l'origine ; la config l'emporte toujours :
 
 | Origine | `steps` | `entrainment` | Pourquoi |
 |---------|---------|---------------|----------|
-| continentale | 1000 | 10 | valeurs de référence |
-| volcanique | 1000 | 14 | flancs ravinés en radiales |
+| continentale | [4000, 5000] | 10 | les montagnes demandent beaucoup de pas pour se creuser |
+| volcanique | [2000, 5000] | 14 | de peu à très érodé selon la seed ; flancs ravinés en radiales |
 | sédimentaire | 100 | 10 | presque pas de relief à façonner |
 | corallienne | 50 | 10 | idem ; l'anneau ne doit pas s'abîmer |
 

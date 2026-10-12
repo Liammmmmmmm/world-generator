@@ -173,7 +173,7 @@
     "particles": {
       "enabled": true,
       "steps": null,                   // pas d'érosion ; à chaque pas, des gouttes naissent et descendent jusqu'à leur mort ;
-                                       // volc. et cont. 1000, séd. 100, cor. 50 (peu de relief à façonner)
+                                       // cont. [4000, 5000], volc. [2000, 5000] (peu à très érodé), séd. 100, cor. 50
       "particles_per_step": null,      // null ou 0 : une goutte pour 512 cellules de terre (densité de SimpleHydrology)
       "max_age": 512,                  // itérations au plus par goutte ; à sa mort, elle dépose ce qu'elle porte
       "gravity": 1.0,                  // poids de la pente dans la vitesse (soillib : 2)

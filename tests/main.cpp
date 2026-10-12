@@ -586,8 +586,9 @@ void testErosionPresets() {
             .island()
             .erosion.particles;
     };
-    CHECK(erosion("continental").steps == 1000 && erosion("continental").entrainment == 10.0);
-    CHECK(erosion("volcanic").steps == 1000 && erosion("volcanic").entrainment > 10.0);
+    const auto continental = erosion("continental"), volcanic = erosion("volcanic");
+    CHECK(continental.steps >= 4000 && continental.steps <= 5000 && continental.entrainment == 10.0);
+    CHECK(volcanic.steps >= 2000 && volcanic.steps <= 5000 && volcanic.entrainment > 10.0);
     CHECK(erosion("sedimentary").steps < 200 && erosion("coral").steps < 200);
     // Presets are defaults: the config wins.
     CHECK(erosion("coral", {{"steps", 3000}, {"entrainment", 7.5}}).steps == 3000);

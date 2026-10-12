@@ -471,14 +471,18 @@ void resolveGeology(ParamResolver& r, IslandParams::Geology& g, const IslandPara
 
 // Erosion defaults follow SimpleHydrology; see island_params.jsonc. Presets by
 // origin (columns: volcanic, continental, sedimentary, coral): continental
-// islands use the reference values, volcanic ones entrain more (radial
-// ravines on the flanks), and the low sedimentary and coral islands, with
-// almost no relief to shape, get only a few steps.
+// islands need many steps to carve their mountains; volcanic ones go from
+// barely to deeply eroded (the seed decides) and entrain more (radial ravines
+// on the flanks); the low sedimentary and coral islands, with almost no relief
+// to shape, get only a few steps.
 void resolveErosion(ParamResolver& r, IslandParams& p) {
     auto& e = p.erosion.particles;
     const std::string& origin = p.origin.type;
     e.enabled = r.flag("erosion.particles.enabled", true);
-    e.steps = r.whole("erosion.particles.steps", perOrigin<int>(origin, {{1000, 1000, 100, 50}}));
+    e.steps = r.sampleInteger("erosion.particles.steps", [&](double u) {
+        const auto [min, max] = perOrigin<std::pair<int, int>>(origin, {{{2000, 5000}, {4000, 5000}, {100, 100}, {50, 50}}});
+        return min + static_cast<int>(std::lround(u * (max - min)));
+    });
     e.particlesPerStep = r.whole("erosion.particles.particles_per_step", 0);
     e.maxAge = r.whole("erosion.particles.max_age", 512);
     e.gravity = r.number("erosion.particles.gravity", 1.0);
