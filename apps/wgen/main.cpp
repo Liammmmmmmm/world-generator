@@ -39,7 +39,8 @@ void printUsage() {
                  "  --first-seed S   first seed (default 1)\n"
                  "  --resolution N   override simulation.resolution (e.g. 256 for speed)\n"
                  "  --columns N      thumbnails per row (default 8)\n"
-                 "  --thumbnail PX   thumbnail width (default 256)\n");
+                 "  --thumbnail PX   thumbnail width (default 256)\n"
+                 "  --before-after   each island before (island_init) and after erosion, side by side\n");
 }
 
 } // namespace
@@ -81,6 +82,8 @@ int main(int argc, char** argv) {
             gallery.columns = number(argv[++i]);
         else if (arg == "--thumbnail" && hasValue)
             gallery.thumbnail = number(argv[++i]);
+        else if (arg == "--before-after")
+            gallery.beforeAfter = true;
         else if (arg == "-h" || arg == "--help") {
             printUsage();
             return 0;

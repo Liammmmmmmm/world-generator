@@ -469,16 +469,21 @@ void resolveGeology(ParamResolver& r, IslandParams::Geology& g, const IslandPara
     f.plungeDeg = r.uniform("geology.folding.plunge_deg", 0, 20);
 }
 
-// Erosion defaults follow SimpleHydrology; see island_params.jsonc.
+// Erosion defaults follow SimpleHydrology; see island_params.jsonc. Presets by
+// origin (columns: volcanic, continental, sedimentary, coral): continental
+// islands use the reference values, volcanic ones entrain more (radial
+// ravines on the flanks), and the low sedimentary and coral islands, with
+// almost no relief to shape, get only a few steps.
 void resolveErosion(ParamResolver& r, IslandParams& p) {
     auto& e = p.erosion.particles;
+    const std::string& origin = p.origin.type;
     e.enabled = r.flag("erosion.particles.enabled", true);
-    e.steps = r.whole("erosion.particles.steps", 1000);
+    e.steps = r.whole("erosion.particles.steps", perOrigin<int>(origin, {{1000, 1000, 100, 50}}));
     e.particlesPerStep = r.whole("erosion.particles.particles_per_step", 0);
     e.maxAge = r.whole("erosion.particles.max_age", 512);
     e.gravity = r.number("erosion.particles.gravity", 1.0);
     e.momentumTransfer = r.number("erosion.particles.momentum_transfer", 1.0);
-    e.entrainment = r.number("erosion.particles.entrainment", 10.0);
+    e.entrainment = r.number("erosion.particles.entrainment", perOrigin<double>(origin, {{14.0, 10.0, 10.0, 10.0}}));
     e.depositionRate = r.number("erosion.particles.deposition_rate", 0.1);
     e.evaporationRate = r.number("erosion.particles.evaporation_rate", 0.001);
     e.minVolume = r.number("erosion.particles.min_volume", 0.01);

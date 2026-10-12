@@ -12,8 +12,8 @@ Code : [erosion/](../src/wg/erosion/) (grille, goutte, boucle des pas) et
 [ErosionStage.cpp](../src/wg/gen/stages/ErosionStage.cpp) (conversion des calques, suivi).
 
 **État :** jalons A (gouttes, transfert de masse, débit), B (avalanche thermique,
-matériaux), C (élan) et D (mer). À venir : interaction avec la mer (D), performance (E), réglages
-par origine (F).
+matériaux), C (élan), D (mer), E (performance, mono-thread) et F (réglages par origine).
+Limites connues et pistes : section 11.
 
 ---
 
@@ -262,3 +262,56 @@ limite de leur épaisseur, et la roche sous-marine ne cède plus.
 que les talus, s'effondrent et l'érosion (45 m en moyenne) comble le plateau continental
 peu profond (−10 à −60 m) : des plaines côtières apparaissent. C'est là que les méandres ont
 de la place, mais la silhouette de l'île change nettement.
+
+## 10. Jalons E et F : performance et réglages par origine
+
+### Performance (un seul thread, déterministe)
+
+Profil (échantillonneur de macOS, 1024², 1000 pas) avant optimisation : l'avalanche prenait
+57 % du temps sur une île volcanique et 95 % sur une île continentale (récursion à 6 niveaux,
+exponentielle sur les pentes plus raides que tous les talus, et une consultation de la
+géologie avec un `sin` par paire). Après la liste de travail bornée et l'ancrage des strates
+précalculé :
+
+| Île | Avant | Après | Avalanche | Descente | Cartes |
+|-----|-------|-------|-----------|----------|--------|
+| volcanique (454 gouttes / pas) | 15,8 ms / pas | 13,5 ms / pas | 52 % | 39 % | 8 % |
+| continentale (107 gouttes / pas) | 16,3 ms / pas | 7,3 ms / pas | — | — | — |
+
+Un run de 1000 pas en 1024² prend donc 7 à 14 s.
+
+**Pas de parallélisme, par choix** : le déterminisme prime. Les gouttes en parallèle avec
+écritures atomiques ne sont pas reproductibles ; les tuiles en damier demandent de passer
+les gouttes de tuile en tuile ; la méthode « par voies » (chaque voie voit l'état du début
+du pas plus ses propres modifications, fusion dans un ordre fixe) est déterministe mais
+change le modèle, coûte environ 30 % par goutte et 64 Mo, pour un gain estimé de ×2,5 à ×3.
+Le mode actuel est reproductible au bit près (flux aléatoire par pas, test dédié).
+
+### Préréglages par origine
+
+`erosion.particles.steps` et `entrainment` ont une valeur par défaut selon l'origine (des
+défauts, pas des tirages : la config l'emporte toujours) :
+
+| Origine | `steps` | `entrainment` | Pourquoi |
+|---------|---------|---------------|----------|
+| continentale | 1000 | 10 | valeurs de référence |
+| volcanique | 1000 | 14 | flancs ravinés en radiales |
+| sédimentaire | 100 | 10 | presque pas de relief à façonner |
+| corallienne | 50 | 10 | idem ; l'anneau ne doit pas s'abîmer |
+
+### Galerie avant / après
+
+`wgen <config> --gallery <planche.png> --origin all --before-after` place chaque île avant
+(`island_init`) et après l'érosion côte à côte, avec le nombre de pas dans la légende.
+
+## 11. Limites connues
+
+- **Les îles continentales s'arrondissent.** Leurs montagnes, plus raides que les talus,
+  s'effondrent ; l'érosion comble le plateau sous-marin et les baies : +30 à +55 % de terre,
+  lobes fusionnés, silhouette plus ronde. Pistes : un relief initial moins raide (phase 3,
+  octaves fines du bruit ridged), moins de pas pour cette origine, ou un dépôt sous-marin qui
+  file davantage vers le large.
+- **La dureté des roches n'a presque pas d'effet** (section 7) : même cause, les lits sont
+  couverts de débris.
+- **Méandres** : visibles sur certaines cartes, sans boucles franches partout ; il faut des
+  plaines très plates.

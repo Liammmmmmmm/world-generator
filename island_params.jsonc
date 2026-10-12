@@ -168,16 +168,17 @@
 
   // Érosion hydraulique par particules (SimpleHydrology de Nick McDonald, version 2023, et soillib).
   // Repère normalisé : une cellule mesure 1 unité, les hauteurs sont en height_scale_m depuis le niveau de la mer.
-  // Valeurs par défaut fixes (non tirées), toutes forçables.
+  // Valeurs par défaut fixes (non tirées), toutes forçables ; steps et entrainment ont un préréglage par origine.
   "erosion": {
     "particles": {
       "enabled": true,
-      "steps": 1000,                   // pas d'érosion ; à chaque pas, des gouttes naissent et descendent jusqu'à leur mort
+      "steps": null,                   // pas d'érosion ; à chaque pas, des gouttes naissent et descendent jusqu'à leur mort ;
+                                       // volc. et cont. 1000, séd. 100, cor. 50 (peu de relief à façonner)
       "particles_per_step": null,      // null ou 0 : une goutte pour 512 cellules de terre (densité de SimpleHydrology)
       "max_age": 512,                  // itérations au plus par goutte ; à sa mort, elle dépose ce qu'elle porte
       "gravity": 1.0,                  // poids de la pente dans la vitesse (soillib : 2)
       "momentum_transfer": 1.0,        // entraînement des gouttes par le courant moyen (cohérence des rivières, méandres)
-      "entrainment": 10.0,             // sédiment transportable en plus par unité de débit normalisé
+      "entrainment": null,             // sédiment transportable en plus par unité de débit normalisé ; volc. 14, autres 10
       "deposition_rate": 0.1,          // part de l'écart à l'équilibre échangée à chaque itération (0, 1]
       "evaporation_rate": 0.001,       // perte de volume par itération [0, 1)
       "min_volume": 0.01,              // la goutte meurt en dessous

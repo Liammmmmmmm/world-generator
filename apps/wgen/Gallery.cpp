@@ -23,6 +23,7 @@ constexpr wg::Rgb kDimText{150, 150, 155};
 constexpr int kMargin = 10;
 constexpr int kCaption = 22;
 constexpr int kHeader = 34;
+constexpr int kPairGap = 4; // between the two images of a before / after pair
 
 struct Job {
     std::string origin; // empty: as configured / drawn
@@ -45,14 +46,28 @@ void generate(const GalleryOptions& options, const nlohmann::json& raw, Job& job
     if (snapshots.empty() || !snapshots.back().state.hasLayer(wg::layers::kHeight))
         throw std::runtime_error("no heightmap produced");
     const auto& state = snapshots.back().state;
-    const auto image = wg::renderView(state, {wg::View::Kind::Layer, std::string(wg::layers::kHeight)}, wg::ColorMap::Auto);
-    const int height = std::max(1, options.thumbnail * image.height / image.width);
-    job.thumbnail = wg::resizeImage(image, options.thumbnail, height);
+    const auto thumbnail = [&](const wg::WorldState& s) {
+        const auto image = wg::renderView(s, {wg::View::Kind::Layer, std::string(wg::layers::kHeight)}, wg::ColorMap::Auto);
+        return wg::resizeImage(image, options.thumbnail, std::max(1, options.thumbnail * image.height / image.width));
+    };
+    job.thumbnail = thumbnail(state);
+    if (options.beforeAfter) { // the initial island on the left, the final one on the right
+        const auto init = std::find_if(snapshots.begin(), snapshots.end(),
+                                       [](const wg::Snapshot& s) { return s.stageType == "island_init"; });
+        if (init == snapshots.end())
+            throw std::runtime_error("--before-after needs an island_init stage");
+        const wg::RgbaImage before = thumbnail(init->state), after = job.thumbnail;
+        job.thumbnail = wg::makeRgbaImage(2 * options.thumbnail + kPairGap, before.height, kBackground);
+        wg::blit(job.thumbnail, before, 0, 0);
+        wg::blit(job.thumbnail, after, options.thumbnail + kPairGap, 0);
+    }
 
     const auto& p = state.params().values;
     // With one group per origin, the origin is the group title.
     job.caption = options.origin == "all" ? "seed " + std::to_string(job.seed)
                                           : std::to_string(job.seed) + "  " + p.origin.type;
+    if (options.beforeAfter)
+        job.caption += "  " + std::to_string(p.erosion.particles.enabled ? p.erosion.particles.steps : 0) + " steps";
 }
 
 } // namespace
@@ -106,7 +121,8 @@ int runGallery(const GalleryOptions& options) {
     tileHeight = std::max(tileHeight, options.thumbnail);
     const int columns = std::max(1, std::min(options.columns, options.count));
     const int rowsPerGroup = (options.count + columns - 1) / columns;
-    const int cellW = options.thumbnail + kMargin, cellH = tileHeight + kCaption + kMargin;
+    const int tileWidth = options.beforeAfter ? 2 * options.thumbnail + kPairGap : options.thumbnail;
+    const int cellW = tileWidth + kMargin, cellH = tileHeight + kCaption + kMargin;
     const int header = groups.size() > 1 ? kHeader : 0;
     const int sheetW = kMargin + columns * cellW;
     const int sheetH = kMargin + static_cast<int>(groups.size()) * (header + rowsPerGroup * cellH);
@@ -129,7 +145,7 @@ int runGallery(const GalleryOptions& options) {
             }
             wg::blit(sheet, job.thumbnail, x, y);
             std::string caption = job.caption; // shortened to the thumbnail width
-            while (caption.size() > 1 && wg::textWidth(caption, 2) > options.thumbnail)
+            while (caption.size() > 1 && wg::textWidth(caption, 2) > tileWidth)
                 caption.pop_back();
             wg::drawText(sheet, x, y + tileHeight + 5, caption, kDimText, 2);
         }

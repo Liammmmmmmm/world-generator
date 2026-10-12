@@ -579,6 +579,21 @@ void testReliefZones() {
     CHECK(min >= 0.0f && max > 50.0f && max <= 300.0f);
 }
 
+void testErosionPresets() {
+    const auto erosion = [](const char* origin, nlohmann::json particles = nlohmann::json::object()) {
+        return wg::WorldConfig::fromJson(
+                   {{"seed", 1}, {"origin", {{"type", origin}}}, {"erosion", {{"particles", particles}}}})
+            .island()
+            .erosion.particles;
+    };
+    CHECK(erosion("continental").steps == 1000 && erosion("continental").entrainment == 10.0);
+    CHECK(erosion("volcanic").steps == 1000 && erosion("volcanic").entrainment > 10.0);
+    CHECK(erosion("sedimentary").steps < 200 && erosion("coral").steps < 200);
+    // Presets are defaults: the config wins.
+    CHECK(erosion("coral", {{"steps", 3000}, {"entrainment", 7.5}}).steps == 3000);
+    CHECK(erosion("volcanic", {{"entrainment", 7.5}}).entrainment == 7.5);
+}
+
 void testSharedAxis() {
     const auto p = wg::WorldConfig::fromJson({{"seed", 4}, {"origin", {{"type", "continental"}}}}).island();
     CHECK(p.geology.folding.axisAngleDeg == p.shape.mainAxisDeg);
@@ -840,6 +855,7 @@ int main() {
     testIslandFitsInMap();
     testShapeByOrigin();
     testSharedAxis();
+    testErosionPresets();
     testReliefByOrigin();
     testReliefZones();
     testAtoll();

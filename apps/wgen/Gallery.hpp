@@ -16,6 +16,7 @@ struct GalleryOptions {
     std::optional<int> resolution;    // overrides simulation.resolution (faster previews)
     int columns = 8;
     int thumbnail = 256;              // thumbnail width in pixels
+    bool beforeAfter = false;         // each island before (island_init) and after (final) erosion
 };
 
 // Returns 0 on success, prints errors and returns 1 otherwise.

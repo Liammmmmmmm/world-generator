@@ -31,6 +31,8 @@ Options CMake : `-DWG_BUILD_VIEWER=OFF` (sans raylib), `-DWG_BUILD_TESTS=OFF`.
 
 # Galerie : beaucoup de seeds d'un coup, en vignettes (ici 16 par origine)
 ./build/apps/wgen/wgen island_params.jsonc --gallery output/gallery.png --origin all --count 16 --resolution 512
+# ...chaque île avant et après l'érosion, côte à côte
+./build/apps/wgen/wgen island_params.jsonc --gallery output/erosion.png --origin all --before-after
 
 # Visualiser depuis une config : la génération se suit en direct, chaque étape
 # est inspectable, et tout est régénéré à chaque sauvegarde du fichier
