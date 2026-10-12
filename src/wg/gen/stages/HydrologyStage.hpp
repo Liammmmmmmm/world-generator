@@ -6,7 +6,8 @@
 namespace wg {
 
 // Step 5: rivers and lakes on the final terrain (hydrology.*), at the block
-// resolution (after the upscale):
+// resolution (after the upscale). The sea is what lies below sea level and
+// is connected to the map border (an inland hollow below sea level is not):
 //   1. conditioning (Priority-Flood with hybrid breaching, Lindsay 2016):
 //      from the outlets (sea, map border) inwards, lowest first. A depression
 //      behind a small barrier (a sediment bar on the coast) is drained by a
@@ -21,7 +22,8 @@ namespace wg {
 //      it is drawn as a band of that width, its bed carved under its surface,
 //      its surface never above the lowest dry bank (no wall of water);
 //   4. lakes: filled depressions at least lake_min_depth_m deep, covering
-//      lake_min_area_m2, at the level of their lowest rim.
+//      lake_min_area_m2, at the level of their lowest rim; smaller ones are
+//      filled up to their spill level (no dry hollow, no puddle).
 // Modifies "h" (cut channels, river beds) and produces water_surface and
 // water (dry / sea / lake / river).
 class HydrologyStage final : public Stage {

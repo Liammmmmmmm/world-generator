@@ -50,7 +50,10 @@ void VoxelizeStage::run(WorldState& world, const StageContext& context) {
             if (type == layers::kLake || type == layers::kRiver)
                 c.water = std::max(c.ground, static_cast<int>(std::floor(blockY(water->at(x, z)))));
         }
-        if (c.ground < info.seaLevel) // the sea
+        // The sea: as found by the hydrology (connected to the ocean), else
+        // everything below sea level.
+        const bool sea = kind ? static_cast<int>(kind->at(x, z)) == layers::kSea : c.ground < info.seaLevel;
+        if (sea)
             c.water = std::max(c.water, info.seaLevel - 1);
         return c;
     };

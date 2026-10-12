@@ -46,9 +46,31 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
     Grid2D<float>& water = world.createLayer(layers::kWaterSurface, nx, ny, 0.0f, {LayerStyle::Height, {}});
     std::vector<std::string> kindNames(std::begin(layers::kWaterKindNames), std::end(layers::kWaterKindNames));
     Grid2D<float>& kind = world.createLayer(layers::kWater, nx, ny, layers::kDry, {LayerStyle::Categorical, kindNames});
-    for (std::size_t k = 0; k < n; ++k)
-        if (h.data()[k] < sea)
-            kind.data()[k] = layers::kSea;
+    // The sea: the cells below sea level connected to the map border (the
+    // ocean), not an inland hollow that happens to be below sea level.
+    const auto markSea = [&] {
+        std::vector<std::size_t> stack;
+        const auto visit = [&](int i, int j) {
+            const std::size_t k = static_cast<std::size_t>(j) * nx + i;
+            if (h.data()[k] < sea && static_cast<int>(kind.data()[k]) != layers::kSea) {
+                kind.data()[k] = layers::kSea;
+                stack.push_back(k);
+            }
+        };
+        for (int i = 0; i < nx; ++i)
+            visit(i, 0), visit(i, ny - 1);
+        for (int j = 0; j < ny; ++j)
+            visit(0, j), visit(nx - 1, j);
+        while (!stack.empty()) {
+            const std::size_t k = stack.back();
+            stack.pop_back();
+            const int i = static_cast<int>(k % nx), j = static_cast<int>(k / nx);
+            for (int d = 0; d < 8; ++d) // 8-connected, like the flow (cut channels go diagonally too)
+                if (i + kDi[d] >= 0 && j + kDj[d] >= 0 && i + kDi[d] < nx && j + kDj[d] < ny)
+                    visit(i + kDi[d], j + kDj[d]);
+        }
+    };
+    markSea();
     const auto finish = [&] { // water surface: the sea level, a lake level (set), the ground
         for (std::size_t k = 0; k < n; ++k) {
             const auto type = static_cast<int>(kind.data()[k]);
@@ -80,7 +102,7 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
     for (int j = 0; j < ny; ++j) {
         for (int i = 0; i < nx; ++i) {
             const std::size_t k = index(i, j);
-            if (h.data()[k] < sea || i == 0 || j == 0 || i == nx - 1 || j == ny - 1) {
+            if (static_cast<int>(kind.data()[k]) == layers::kSea || i == 0 || j == 0 || i == nx - 1 || j == ny - 1) {
                 state[k] = kReached;
                 queue.push({elev[k], static_cast<std::uint32_t>(k)});
             }
@@ -180,9 +202,11 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
         if (--donors[m] == 0)
             ready.push_back(static_cast<std::uint32_t>(m));
     }
-    // Cut channels lower the ground.
+    // Cut channels lower the ground; a hollow below sea level drained by a cut
+    // to the ocean joins the sea (a small estuary).
     for (std::size_t k = 0; k < n; ++k)
         h.data()[k] = std::min(h.data()[k], elev[k]);
+    markSea();
     context.progress(0.6f);
 
     // --- 3. Lakes: filled depressions, at the level of their lowest rim -------
@@ -215,8 +239,13 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
             deepest = std::max(deepest, rim - h.data()[k]);
             wet += h.data()[k] < rim;
         }
-        if (deepest < p.lakeMinDepthM || static_cast<double>(wet) * cellArea < p.lakeMinAreaM2)
+        if (deepest < p.lakeMinDepthM || static_cast<double>(wet) * cellArea < p.lakeMinAreaM2) {
+            // Too small for a lake: filled up to its spill level, as sediment
+            // would, rather than a dry hollow (or a puddle below sea level).
+            for (std::size_t k : component)
+                h.data()[k] = std::max(h.data()[k], elev[k]);
             continue;
+        }
         ++lakes;
         for (std::size_t k : component) {
             if (h.data()[k] < rim && static_cast<int>(kind.data()[k]) == layers::kDry) {

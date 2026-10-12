@@ -37,7 +37,7 @@ centaines de mètres) et les sommets coupés en haut (à corriger avec
 | surface en pente douce (≤ `grass_max_slope_deg`, 40°) | grass, sur `dirt_depth_blocks` (3) de dirt ; dirt sous l'eau |
 | surface en pente forte | stone |
 | rivières et lacs (`water`) | dirt au fond, eau jusqu'à `water_surface` (voir l'[étape 5](etape-5-hydrologie.md)) |
-| entre le fond et le niveau de la mer | water |
+| la mer (`water` : reliée à l'océan), du fond au niveau de la mer | water |
 
 La pente est mesurée sur `h`, en blocs par bloc.
 

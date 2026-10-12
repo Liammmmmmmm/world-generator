@@ -31,7 +31,17 @@ de simulation. Environ 160 ms en 4096².
 
 ## 3. Hydrologie (étape 5)
 
-### 3.1 Conditionnement : remplir ou creuser
+### 3.1 La mer
+
+La mer, ce sont les cellules sous le niveau de la mer **reliées au bord de la carte** (l'océan,
+en 8-connexité comme l'écoulement). Un creux à l'intérieur des terres qui descend sous le
+niveau de la mer (par exemple derrière un tas de sédiments au pied des montagnes) n'est pas
+la mer : c'est une dépression comme une autre, creusée vers l'océan ou remplie. Auparavant,
+ces flaques servaient d'exutoires et des rivières s'y arrêtaient (sur la seed 7, 11 229
+cellules de rivière sur 17 894 n'atteignaient pas l'océan). La mer est recalculée après le
+creusement : une flaque drainée par un chenal vers l'océan devient un petit estuaire.
+
+### 3.2 Conditionnement : remplir ou creuser
 
 **Priority-Flood avec creusement hybride** (Lindsay 2016). On inonde depuis les exutoires (la
 mer et le bord de la carte), la cellule la plus basse d'abord. Quand l'inondation atteint une
@@ -49,23 +59,25 @@ cellule plus basse que celle d'où elle vient, cette cellule est au fond d'une d
 Les zones plates reçoivent la même pente de 1 mm par cellule. Toute cellule a ainsi une
 voisine strictement plus basse, jusqu'à la mer : l'eau ne peut ni boucler ni stagner.
 
-### 3.2 Écoulement et aire drainée
+### 3.3 Écoulement et aire drainée
 
 Chaque cellule s'écoule vers sa voisine de plus grande pente (D8, pente divisée par la
 distance). Les pentes sont légèrement perturbées (± 10 %, de façon déterministe selon la
 seed), sinon les zones plates et les pentes régulières donneraient de longues lignes droites.
 L'aire drainée (pluie uniforme pour l'instant) est cumulée de l'amont vers l'aval.
 
-### 3.3 Lacs
+### 3.4 Lacs
 
 Les cellules remplies forment des composantes connexes. Pour chacune, le niveau du lac est le
 **terrain le plus bas de son pourtour** : l'eau ne déborde jamais. Une composante devient un lac
 si elle a au moins `lake_min_depth_m` d'eau et `lake_min_area_m2` de surface sous ce niveau.
+Sinon, elle est **comblée** jusqu'à son niveau de débordement, comme le feraient des
+sédiments : ni creux sec, ni flaque.
 Avec les réglages par défaut, les îles testées n'ont aucun lac : toutes leurs dépressions
 font moins de 3 m et sont creusées. Augmenter `lake_min_depth_m` ou baisser
 `breach_max_depth_m` en fait apparaître.
 
-### 3.4 Rivières
+### 3.5 Rivières
 
 Une cellule sèche dont l'aire drainée dépasse `river_min_area_m2` est sur une rivière. Le seuil
 fixe la **source** : plus il est bas, plus les rivières naissent haut et plus il y a
@@ -84,7 +96,7 @@ profondeur = max(1 m, river_depth_ratio × largeur)
   bloc à l'autre, l'eau s'écoule en petite cascade, comme dans Minecraft.
 - **Lit** : le terrain est creusé `profondeur` sous la surface, et l'eau le remplit.
 
-### 3.5 Paramètres
+### 3.6 Paramètres
 
 | Paramètre | Défaut | Rôle |
 |-----------|--------|------|
@@ -97,7 +109,7 @@ profondeur = max(1 m, river_depth_ratio × largeur)
 | `breach_max_depth_m` | 3 | profondeur maximale d'un chenal creusé |
 | `breach_max_length_m` | 300 | longueur maximale d'un chenal creusé |
 
-### 3.6 Calques produits (à la résolution des blocs)
+### 3.7 Calques produits (à la résolution des blocs)
 
 | Calque | Contenu |
 |--------|---------|
@@ -105,11 +117,13 @@ profondeur = max(1 m, river_depth_ratio × largeur)
 | `water_surface` | dessus de l'eau (m) : niveau de la mer, d'un lac ou d'une rivière ; le terrain s'il est sec |
 | `water` | catégories : sec, mer, lac, rivière |
 
-### 3.7 Vérifications et coût
+### 3.8 Vérifications et coût
 
-En 4096², sur une île volcanique et deux îles continentales : **toutes les cellules de rivière
-sont reliées à la mer** par de l'eau, et **aucun bloc d'eau n'a d'air à côté de lui au-dessus
-d'un sol sec** (aucun mur d'eau). Les mêmes vérifications sont dans les tests. Environ 4,4 s,
+En 4096², sur une île volcanique et trois îles continentales (dont la seed 7) : **toutes les
+cellules de rivière sont reliées à l'océan** (au bord de la carte) par de l'eau, et **aucun
+bloc d'eau n'a d'air à côté de lui au-dessus d'un sol sec** (aucun mur d'eau). Il reste
+quelques centaines de cellules sèches à moins d'un mètre sous le niveau de la mer, au bord de
+l'eau : en blocs, leur sol est au niveau de la surface de la mer (des berges plates). Les mêmes vérifications sont dans les tests. Environ 4,4 s,
 pour un pic mémoire de 1,1 Go sur toute la génération.
 
 ## 4. Limites connues
