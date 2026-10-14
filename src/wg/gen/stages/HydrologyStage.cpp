@@ -329,13 +329,19 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
     // from its water, so a river crossing a slope lies in a small valley, not
     // at the bottom of a trench. A bank is lowered from the river outwards
     // (Dijkstra on the allowed height), never below the sea or a lake beside it.
+    // Only the foot of the banks is softened: up to river_bank_height_m above
+    // the water, and by that much at most. A higher wall is a real cliff (a
+    // gorge), kept as it is: the softening stops there, and a steep hillside
+    // above a river keeps its relief.
     {
         const float rise = static_cast<float>(std::tan(p.riverBankSlopeDeg * std::numbers::pi / 180.0) * cellM);
-        std::vector<float> allowed(n, kInfinity);
+        std::vector<float> allowed(n, kInfinity), source(n, kInfinity); // source: the water level it is graded from
         std::priority_queue<Entry, std::vector<Entry>, std::greater<>> banks;
         for (std::size_t b = 0; b < n; ++b)
-            if (isRiver(b))
+            if (isRiver(b)) {
+                source[b] = level[b];
                 banks.push({level[b], static_cast<std::uint32_t>(b)});
+            }
         while (!banks.empty()) {
             const auto [top, c] = banks.top();
             banks.pop();
@@ -348,7 +354,10 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
                 const float next = top + rise * ((d % 2) ? std::numbers::sqrt2_v<float> : 1.0f);
                 if (next >= h.data()[m] || next >= allowed[m])
                     continue; // already low enough: the bank ends here
+                if (next > source[c] + p.riverBankHeightM || h.data()[m] - next > p.riverBankHeightM)
+                    continue; // above the foot of the bank, or a cliff
                 allowed[m] = next;
+                source[m] = source[c];
                 banks.push({next, static_cast<std::uint32_t>(m)});
             }
         }

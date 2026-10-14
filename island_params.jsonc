@@ -210,7 +210,8 @@
     "river_width_coeff": 0.01,         // largeur = coeff * racine(aire drainée en m²) : 1 km² -> 10 m
     "river_min_width_m": 1,            // largeur des sources
     "river_depth_ratio": 0.4,          // profondeur au milieu du lit = ratio * largeur, au moins 1 m
-    "river_bank_slope_deg": 35,        // pente maximale des berges depuis l'eau (le terrain trop raide autour est abaissé)
+    "river_bank_slope_deg": 35,        // pente maximale des berges depuis l'eau (le terrain trop raide autour est abaissé)...
+    "river_bank_height_m": 4,          // ...jusqu'à 4 m au-dessus de l'eau, de 4 m au plus ; au-delà : une vraie falaise, gardée
     "lake_min_depth_m": 1,             // une dépression remplie plus profonde que ça : un lac
     "lake_min_area_m2": 1000,          // plus petit : pas de lac
     "breach_max_depth_m": 3,           // une dépression est drainée par un chenal creusé au plus aussi profond...

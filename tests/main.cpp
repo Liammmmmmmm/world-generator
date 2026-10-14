@@ -783,6 +783,15 @@ void testHydrology() {
     std::printf("  hydrology: %d river cells, %d of %d banks steeper than the bank slope\n", rivers, steep, banks);
     CHECK(rivers > 100 && cut == 0 && consistent && narrow > 0);
     CHECK(steep * 100 < banks); // a few where a river falls by a step
+    // The dry relief is kept: lowered at most by a cut channel (3 m) or the
+    // foot of a bank (4 m), never planed down (a steep hillside above a river).
+    const auto& before = snapshots[3].state.layer(wg::layers::kHeight);
+    float deepestCut = 0.0f;
+    for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i)
+            if (is(i, j, wg::layers::kDry))
+                deepestCut = std::max(deepestCut, before.at(i, j) - h.at(i, j));
+    CHECK(deepestCut <= 4.01f);
 }
 
 void testVoxelize() {

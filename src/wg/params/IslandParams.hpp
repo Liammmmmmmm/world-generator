@@ -224,7 +224,8 @@ struct IslandParams {
         double riverWidthCoeff = 0.0;  // width = coeff * sqrt(drained area in m²)
         double riverMinWidthM = 0.0;
         double riverDepthRatio = 0.0;  // depth in the middle = ratio * width, at least 1 m
-        double riverBankSlopeDeg = 0.0; // the dry ground beside a river rises at most this steeply from its water
+        double riverBankSlopeDeg = 0.0; // the dry ground beside a river rises at most this steeply from its water...
+        double riverBankHeightM = 0.0;  // ...up to this above the water, by at most this (more: a real cliff, kept)
         double lakeMinDepthM = 0.0;
         double lakeMinAreaM2 = 0.0;
         double breachMaxDepthM = 0.0;  // depressions drained by a cut at most this deep...

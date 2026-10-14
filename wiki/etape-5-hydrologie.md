@@ -99,8 +99,14 @@ profondeur = max(1 m, river_depth_ratio × largeur)                             
 - **Berges en pente** : le terrain sec au bord d'une rivière ne monte pas plus raide que
   `river_bank_slope_deg` depuis la surface de l'eau ; ce qui dépasse est abaissé, de la rivière
   vers l'extérieur, jusqu'à retrouver le terrain. Une rivière qui traverse une pente coule ainsi
-  dans un petit vallon et non au fond d'une tranchée aux bords droits. Une berge n'est jamais
-  abaissée sous la mer ni sous un lac voisin. Après cet abaissement, la surface de l'eau est de
+  dans un petit vallon et non au fond d'une tranchée aux bords droits. Seul le pied des berges
+  est adouci : jusqu'à `river_bank_height_m` au-dessus de l'eau, et de `river_bank_height_m` au
+  plus. Un mur plus haut est une vraie falaise (une gorge), gardée telle quelle, et
+  l'adoucissement s'arrête là. Sans cette limite, au pied d'une falaise ou d'un versant plus
+  raide que la pente des berges, l'adoucissement se propageait de proche en proche et rabotait
+  tout le versant en un plan incliné (seed 5 : 491 000 cellules abaissées, jusqu'à 60 m ; avec
+  la limite : 18 000, de 4 m au plus). Une berge n'est jamais abaissée sous la mer ni sous un
+  lac voisin. Après cet abaissement, la surface de l'eau est de
   nouveau plafonnée par les berges (une petite marche là où la rivière descend).
 - **Lit** : le terrain est creusé sous la surface, de `profondeur` au milieu du lit et de moins
   en moins vers les bords (profil en creux, au moins 1 m partout), et l'eau le remplit.
@@ -114,6 +120,7 @@ profondeur = max(1 m, river_depth_ratio × largeur)                             
 | `river_min_width_m` | 1 | largeur des sources |
 | `river_depth_ratio` | 0,4 | profondeur au milieu du lit selon la largeur |
 | `river_bank_slope_deg` | 35 | pente maximale des berges depuis l'eau |
+| `river_bank_height_m` | 4 | hauteur des berges adoucies (au-delà : une falaise, gardée) |
 | `lake_min_depth_m` | 1 | profondeur minimale d'un lac |
 | `lake_min_area_m2` | 1 000 | surface minimale d'un lac |
 | `breach_max_depth_m` | 3 | profondeur maximale d'un chenal creusé |
@@ -133,7 +140,7 @@ En 4096², sur une île volcanique et trois îles continentales (dont la seed 7)
 cellules de rivière sont reliées à l'océan** (au bord de la carte) par de l'eau, et **aucun
 bloc d'eau n'a d'air à côté de lui au-dessus d'un sol sec** (aucun mur d'eau). Sur la seed 7,
 aucune berge ne dépasse l'eau de plus d'un bloc (auparavant jusqu'à 4 blocs, à la verticale) ;
-l'adoucissement abaisse environ 9 000 cellules, de 6 m au plus. Les quelques
+l'adoucissement abaisse environ 7 500 cellules, de 4 m au plus. Les quelques
 cellules sèches restées sous le niveau de la mer au bord de l'eau (à moins d'un mètre, non
 reliées à l'océan) sont remontées au niveau de la mer : des berges au ras de l'eau, pas des
 trous. Les mêmes vérifications sont dans les tests. Environ 4,4 s,

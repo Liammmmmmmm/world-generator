@@ -531,11 +531,12 @@ void resolveHydrology(ParamResolver& r, IslandParams::Hydrology& h) {
     h.riverMinWidthM = r.number("hydrology.river_min_width_m", 1.0);
     h.riverDepthRatio = r.number("hydrology.river_depth_ratio", 0.4);
     h.riverBankSlopeDeg = r.number("hydrology.river_bank_slope_deg", 35.0);
+    h.riverBankHeightM = r.number("hydrology.river_bank_height_m", 4.0);
     h.lakeMinDepthM = r.number("hydrology.lake_min_depth_m", 1.0);
     h.lakeMinAreaM2 = r.number("hydrology.lake_min_area_m2", 1000.0);
     h.breachMaxDepthM = r.number("hydrology.breach_max_depth_m", 3.0);
     h.breachMaxLengthM = r.number("hydrology.breach_max_length_m", 300.0);
-    if (h.riverMinAreaM2 <= 0.0 || h.riverWidthCoeff < 0.0 || h.riverMinWidthM < 0.0 || h.riverDepthRatio < 0.0 ||
+    if (h.riverMinAreaM2 <= 0.0 || h.riverWidthCoeff < 0.0 || h.riverMinWidthM < 0.0 || h.riverDepthRatio < 0.0 || h.riverBankHeightM < 0.0 ||
         h.lakeMinDepthM < 0.0 || h.lakeMinAreaM2 < 0.0 || h.breachMaxDepthM < 0.0 || h.breachMaxLengthM < 0.0)
         throw ConfigError("'hydrology': river_min_area_m2 > 0, the other sizes >= 0");
     if (h.riverBankSlopeDeg <= 0.0 || h.riverBankSlopeDeg >= 90.0)
