@@ -85,7 +85,7 @@ d'affluents (sur une île volcanique en 4096² : 74 sources à 15 000 m², 192 �
 
 ```
 largeur    = max(river_min_width_m, river_width_coeff × √(aire drainée en m²))   // 1 km² -> 10 m
-profondeur = max(1 m, river_depth_ratio × largeur)
+profondeur = max(1 m, river_depth_ratio × largeur)                               // au milieu du lit
 ```
 
 - **Bande** : un disque de la largeur de la rivière autour de chaque cellule du tracé, sur les
@@ -94,7 +94,14 @@ profondeur = max(1 m, river_depth_ratio × largeur)
 - **Berges** : la surface de l'eau ne dépasse jamais le terrain d'une voisine sèche, ni le
   niveau de la mer à côté d'elle (elle arrive alors au ras de la mer). Il n'y a donc pas de mur d'eau ; là où le niveau baisse d'un
   bloc à l'autre, l'eau s'écoule en petite cascade, comme dans Minecraft.
-- **Lit** : le terrain est creusé `profondeur` sous la surface, et l'eau le remplit.
+- **Berges en pente** : le terrain sec au bord d'une rivière ne monte pas plus raide que
+  `river_bank_slope_deg` depuis la surface de l'eau ; ce qui dépasse est abaissé, de la rivière
+  vers l'extérieur, jusqu'à retrouver le terrain. Une rivière qui traverse une pente coule ainsi
+  dans un petit vallon et non au fond d'une tranchée aux bords droits. Une berge n'est jamais
+  abaissée sous la mer ni sous un lac voisin. Après cet abaissement, la surface de l'eau est de
+  nouveau plafonnée par les berges (une petite marche là où la rivière descend).
+- **Lit** : le terrain est creusé sous la surface, de `profondeur` au milieu du lit et de moins
+  en moins vers les bords (profil en creux, au moins 1 m partout), et l'eau le remplit.
 
 ### 3.6 Paramètres
 
@@ -103,7 +110,8 @@ profondeur = max(1 m, river_depth_ratio × largeur)
 | `river_min_area_m2` | 15 000 | aire drainée à la source |
 | `river_width_coeff` | 0,01 | largeur selon l'aire drainée |
 | `river_min_width_m` | 1 | largeur des sources |
-| `river_depth_ratio` | 0,15 | profondeur selon la largeur |
+| `river_depth_ratio` | 0,4 | profondeur au milieu du lit selon la largeur |
+| `river_bank_slope_deg` | 35 | pente maximale des berges depuis l'eau |
 | `lake_min_depth_m` | 1 | profondeur minimale d'un lac |
 | `lake_min_area_m2` | 1 000 | surface minimale d'un lac |
 | `breach_max_depth_m` | 3 | profondeur maximale d'un chenal creusé |
@@ -113,7 +121,7 @@ profondeur = max(1 m, river_depth_ratio × largeur)
 
 | Calque | Contenu |
 |--------|---------|
-| `h` | modifié : chenaux creusés, lits des rivières |
+| `h` | modifié : chenaux creusés, lits et berges des rivières |
 | `water_surface` | dessus de l'eau (m) : niveau de la mer, d'un lac ou d'une rivière ; le terrain s'il est sec |
 | `water` | catégories : sec, mer, lac, rivière |
 
@@ -121,7 +129,9 @@ profondeur = max(1 m, river_depth_ratio × largeur)
 
 En 4096², sur une île volcanique et trois îles continentales (dont la seed 7) : **toutes les
 cellules de rivière sont reliées à l'océan** (au bord de la carte) par de l'eau, et **aucun
-bloc d'eau n'a d'air à côté de lui au-dessus d'un sol sec** (aucun mur d'eau). Les quelques
+bloc d'eau n'a d'air à côté de lui au-dessus d'un sol sec** (aucun mur d'eau). Sur la seed 7,
+aucune berge ne dépasse l'eau de plus d'un bloc (auparavant jusqu'à 4 blocs, à la verticale) ;
+l'adoucissement abaisse environ 9 000 cellules, de 6 m au plus. Les quelques
 cellules sèches restées sous le niveau de la mer au bord de l'eau (à moins d'un mètre, non
 reliées à l'océan) sont remontées au niveau de la mer : des berges au ras de l'eau, pas des
 trous. Les mêmes vérifications sont dans les tests. Environ 4,4 s,
@@ -129,8 +139,6 @@ pour un pic mémoire de 1,1 Go sur toute la génération.
 
 ## 4. Limites connues
 
-- **Lits en tranchée** : sur une forte pente en travers, la berge la plus basse plafonne
-  l'eau, et la rivière coule au fond d'une petite tranchée.
 - **Pluie uniforme** : le vent et l'humidité (`climate`) pourront la pondérer.
 - **Taille du `.wgw`** : `h`, `water_surface` et `water` en 4096² font 64 Mo chacun non
   compressés (650 Mo avec les voxels). Une compression zlib du fichier serait bienvenue.

@@ -264,19 +264,21 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
 
     // --- 4. Rivers: bands along the flow paths -------------------------------
     std::vector<float> level(n, kInfinity), depth(n, 0.0f);
-    int sources = 0, riverCells = 0;
+    int sources = 0, riverCells = 0, bankCells = 0;
+    float bankCut = 0.0f;
     for (std::size_t k = 0; k < n; ++k) {
         if (area[k] < p.riverMinAreaM2 || static_cast<int>(kind.data()[k]) != layers::kDry)
             continue;
         ++riverCells;
         const double width = std::max(p.riverMinWidthM, p.riverWidthCoeff * std::sqrt(area[k]));
-        const float bed = static_cast<float>(std::max(1.0, p.riverDepthRatio * width));
+        const double bed = std::max(1.0, p.riverDepthRatio * width); // in the middle
         const double radius = width / cellM / 2.0; // in cells
         const int reach = static_cast<int>(std::floor(radius));
         const int i = static_cast<int>(k % nx), j = static_cast<int>(k / nx);
         for (int dj = -reach; dj <= reach; ++dj) {
             for (int di = -reach; di <= reach; ++di) {
-                if ((di != 0 || dj != 0) && std::hypot(di, dj) > radius)
+                const double r = std::hypot(di, dj);
+                if (r > std::max(radius, 0.0))
                     continue;
                 const int bi = i + di, bj = j + dj;
                 if (bi < 0 || bj < 0 || bi >= nx || bj >= ny)
@@ -285,7 +287,10 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
                 if (static_cast<int>(kind.data()[b]) != layers::kDry)
                     continue; // the band stops at the sea and the lakes (their own water)
                 level[b] = std::min(level[b], elev[k]);
-                depth[b] = std::max(depth[b], bed);
+                // A hollow cross-section: deepest in the middle, shallower
+                // towards the banks, at least 1 m everywhere.
+                const double t = r / (radius + 1.0);
+                depth[b] = std::max(depth[b], static_cast<float>(std::max(1.0, bed * (1.0 - t * t))));
             }
         }
         // A source: no upstream river cell flows into this one.
@@ -296,24 +301,73 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
         }
         sources += !fed;
     }
-    // Banks: the surface never rises above a neighboring dry ground, nor
-    // above the sea it flows into (whose top block is just below sea level).
-    for (std::size_t b = 0; b < n; ++b) {
-        if (level[b] == kInfinity || static_cast<int>(kind.data()[b]) != layers::kDry)
-            continue;
-        for (int d = 0; d < 8; ++d) {
-            std::size_t m;
-            if (!neighbor(b, d, m) || level[m] != kInfinity)
+    const auto isRiver = [&](std::size_t b) {
+        return level[b] != kInfinity && static_cast<int>(kind.data()[b]) == layers::kDry;
+    };
+    // The surface never rises above a neighboring dry ground, nor above the
+    // sea it flows into (whose top block is just below sea level).
+    const auto capSurfaces = [&] {
+        for (std::size_t b = 0; b < n; ++b) {
+            if (!isRiver(b))
                 continue;
-            const auto type = static_cast<int>(kind.data()[m]);
-            if (type == layers::kDry)
-                level[b] = std::min(level[b], h.data()[m]);
-            else if (type == layers::kSea)
-                level[b] = std::min(level[b], sea);
+            for (int d = 0; d < 8; ++d) {
+                std::size_t m;
+                if (!neighbor(b, d, m) || level[m] != kInfinity)
+                    continue;
+                const auto type = static_cast<int>(kind.data()[m]);
+                if (type == layers::kDry)
+                    level[b] = std::min(level[b], h.data()[m]);
+                else if (type == layers::kSea)
+                    level[b] = std::min(level[b], sea);
+            }
+        }
+    };
+    capSurfaces();
+    // Banks: the dry ground beside a river rises at most river_bank_slope_deg
+    // from its water, so a river crossing a slope lies in a small valley, not
+    // at the bottom of a trench. A bank is lowered from the river outwards
+    // (Dijkstra on the allowed height), never below the sea or a lake beside it.
+    {
+        const float rise = static_cast<float>(std::tan(p.riverBankSlopeDeg * std::numbers::pi / 180.0) * cellM);
+        std::vector<float> allowed(n, kInfinity);
+        std::priority_queue<Entry, std::vector<Entry>, std::greater<>> banks;
+        for (std::size_t b = 0; b < n; ++b)
+            if (isRiver(b))
+                banks.push({level[b], static_cast<std::uint32_t>(b)});
+        while (!banks.empty()) {
+            const auto [top, c] = banks.top();
+            banks.pop();
+            if (level[c] == kInfinity && top > allowed[c])
+                continue; // superseded
+            for (int d = 0; d < 8; ++d) {
+                std::size_t m;
+                if (!neighbor(c, d, m) || level[m] != kInfinity || static_cast<int>(kind.data()[m]) != layers::kDry)
+                    continue;
+                const float next = top + rise * ((d % 2) ? std::numbers::sqrt2_v<float> : 1.0f);
+                if (next >= h.data()[m] || next >= allowed[m])
+                    continue; // already low enough: the bank ends here
+                allowed[m] = next;
+                banks.push({next, static_cast<std::uint32_t>(m)});
+            }
+        }
+        for (std::size_t m = 0; m < n; ++m) {
+            if (allowed[m] == kInfinity)
+                continue;
+            float floor = sea;
+            for (int d = 0; d < 8; ++d) {
+                std::size_t l;
+                if (neighbor(m, d, l) && static_cast<int>(kind.data()[l]) == layers::kLake)
+                    floor = std::max(floor, water.data()[l]);
+            }
+            const float lowered = std::min(h.data()[m], std::max(allowed[m], floor));
+            bankCut = std::max(bankCut, h.data()[m] - lowered);
+            bankCells += lowered < h.data()[m];
+            h.data()[m] = lowered;
         }
     }
+    capSurfaces(); // against the lowered banks (a step down where a river falls)
     for (std::size_t b = 0; b < n; ++b) {
-        if (level[b] == kInfinity || static_cast<int>(kind.data()[b]) != layers::kDry)
+        if (!isRiver(b))
             continue;
         h.data()[b] = std::min(h.data()[b], level[b] - depth[b]); // the bed
         water.data()[b] = level[b];
@@ -321,6 +375,7 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
     }
     finish();
     context.log(std::to_string(sources) + " river sources, " + std::to_string(riverCells) + " river path cells, " +
+                std::to_string(bankCells) + " bank cells lowered (at most " + std::to_string(bankCut) + " m), " +
                 std::to_string(lakes) + " lakes, " + std::to_string(breached) + " depressions drained by a cut");
     context.progress(1.0f);
 }

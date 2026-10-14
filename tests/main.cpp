@@ -756,8 +756,10 @@ void testHydrology() {
             }
         }
     }
-    int rivers = 0, cut = 0, narrow = 0;
+    int rivers = 0, cut = 0, narrow = 0, banks = 0, steep = 0;
     bool consistent = true;
+    const double cellM = info.widthM() / nx;
+    const float rise = static_cast<float>(std::tan(35.0 * std::numbers::pi / 180.0) * cellM) + 1e-3f; // default slope
     for (int j = 1; j < ny - 1; ++j) {
         for (int i = 1; i < nx - 1; ++i) {
             if (!is(i, j, wg::layers::kRiver))
@@ -768,9 +770,18 @@ void testHydrology() {
             // A source stretch one block wide.
             narrow += (!is(i - 1, j, wg::layers::kRiver) && !is(i + 1, j, wg::layers::kRiver)) ||
                       (!is(i, j - 1, wg::layers::kRiver) && !is(i, j + 1, wg::layers::kRiver));
+            // Banks: no higher than the bank slope from the water.
+            for (const auto [di, dj] : {std::pair{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+                if (!is(i + di, j + dj, wg::layers::kDry))
+                    continue;
+                ++banks;
+                steep += h.at(i + di, j + dj) > water.at(i, j) + rise;
+            }
         }
     }
+    std::printf("  hydrology: %d river cells, %d of %d banks steeper than the bank slope\n", rivers, steep, banks);
     CHECK(rivers > 100 && cut == 0 && consistent && narrow > 0);
+    CHECK(steep * 100 < banks); // a few where a river falls by a step
 }
 
 void testVoxelize() {

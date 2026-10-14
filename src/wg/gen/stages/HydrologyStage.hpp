@@ -19,8 +19,10 @@ namespace wg {
 //      downstream (uniform rain for now);
 //   3. a river starts where the drained area passes river_min_area_m2 (its
 //      source, high up) and widens downstream (river_width_coeff * sqrt(area));
-//      it is drawn as a band of that width, its bed carved under its surface,
-//      its surface never above the lowest dry bank (no wall of water);
+//      it is drawn as a band of that width, its bed carved under its surface
+//      (deepest in the middle), its surface never above the lowest dry bank
+//      (no wall of water), its banks no steeper than river_bank_slope_deg
+//      from the water (lowered where they are);
 //   4. lakes: filled depressions at least lake_min_depth_m deep, covering
 //      lake_min_area_m2, at the level of their lowest rim; smaller ones are
 //      filled up to their spill level (no dry hollow, no puddle).
