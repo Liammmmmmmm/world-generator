@@ -106,7 +106,12 @@ profondeur = max(1 m, river_depth_ratio × largeur)                             
   raide que la pente des berges, l'adoucissement se propageait de proche en proche et rabotait
   tout le versant en un plan incliné (seed 5 : 491 000 cellules abaissées, jusqu'à 60 m ; avec
   la limite : 18 000, de 4 m au plus). Une berge n'est jamais abaissée sous la mer ni sous un
-  lac voisin. Après cet abaissement, la surface de l'eau est de
+  lac voisin.
+- **Berges irrégulières** : une pente et une hauteur identiques partout dessinaient un biseau
+  régulier le long de chaque rivière, qui soulignait les tronçons droits. Deux bruits lisses
+  (motifs d'environ 8 blocs) font varier la pente d'un endroit à l'autre (entre environ 0,45 et
+  2,3 fois `river_bank_slope_deg`) et la hauteur adoucie (de 0 à `river_bank_height_m`) : ici
+  une petite falaise, là une pente douce. Après cet abaissement, la surface de l'eau est de
   nouveau plafonnée par les berges (une petite marche là où la rivière descend).
 - **Lit** : le terrain est creusé sous la surface, de `profondeur` au milieu du lit et de moins
   en moins vers les bords (profil en creux, au moins 1 m partout), et l'eau le remplit.

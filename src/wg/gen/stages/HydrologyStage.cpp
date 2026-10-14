@@ -11,6 +11,7 @@
 #include "wg/core/Random.hpp"
 #include "wg/core/WorldState.hpp"
 #include "wg/island/IslandLayers.hpp"
+#include "wg/noise/Fbm.hpp"
 
 namespace wg {
 
@@ -21,6 +22,13 @@ namespace {
 constexpr float kEpsilonM = 1e-3f;
 // Relative jitter of the slopes when choosing where a cell flows.
 constexpr float kFlowJitter = 0.1f;
+// The banks vary from place to place (smooth noise, features about
+// kBankNoiseBlocks wide): their slope by a factor 2^(±kBankSlopeVariation),
+// the height softened from 0 to river_bank_height_m (another noise). Irregular
+// banks, a small cliff here, a gentle slope there, rather than a regular bevel
+// along every river.
+constexpr float kBankSlopeVariation = 1.2f;
+constexpr double kBankNoiseBlocks = 8.0;
 
 // D8 neighbors; the direction opposite to d is (d + 4) % 8.
 constexpr int kDi[8] = {1, 1, 0, -1, -1, -1, 0, 1};
@@ -329,12 +337,17 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
     // from its water, so a river crossing a slope lies in a small valley, not
     // at the bottom of a trench. A bank is lowered from the river outwards
     // (Dijkstra on the allowed height), never below the sea or a lake beside it.
+    // The slope (between about 0.45 and 2.3 times river_bank_slope_deg) and
+    // the height softened (0 to river_bank_height_m) vary from place to place,
+    // so the banks are irregular rather than a regular bevel along every river.
     // Only the foot of the banks is softened: up to river_bank_height_m above
     // the water, and by that much at most. A higher wall is a real cliff (a
     // gorge), kept as it is: the softening stops there, and a steep hillside
     // above a river keeps its relief.
     {
         const float rise = static_cast<float>(std::tan(p.riverBankSlopeDeg * std::numbers::pi / 180.0) * cellM);
+        const Fbm slopeNoise(deriveSeed(context.seed, "bank_slope"), {1.0 / kBankNoiseBlocks, 2, 2.0, 0.5});
+        const Fbm heightNoise(deriveSeed(context.seed, "bank_height"), {1.0 / kBankNoiseBlocks, 2, 2.0, 0.5});
         std::vector<float> allowed(n, kInfinity), source(n, kInfinity); // source: the water level it is graded from
         std::priority_queue<Entry, std::vector<Entry>, std::greater<>> banks;
         for (std::size_t b = 0; b < n; ++b)
@@ -351,10 +364,13 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
                 std::size_t m;
                 if (!neighbor(c, d, m) || level[m] != kInfinity || static_cast<int>(kind.data()[m]) != layers::kDry)
                     continue;
-                const float next = top + rise * ((d % 2) ? std::numbers::sqrt2_v<float> : 1.0f);
+                const double x = static_cast<double>(m % nx), y = static_cast<double>(m / nx);
+                const float local = std::exp2(kBankSlopeVariation * slopeNoise(x, y));
+                const float next = top + rise * local * ((d % 2) ? std::numbers::sqrt2_v<float> : 1.0f);
+                const float bank = static_cast<float>(p.riverBankHeightM) * std::clamp(0.5f + heightNoise(x, y), 0.0f, 1.0f);
                 if (next >= h.data()[m] || next >= allowed[m])
                     continue; // already low enough: the bank ends here
-                if (next > source[c] + p.riverBankHeightM || h.data()[m] - next > p.riverBankHeightM)
+                if (next > source[c] + bank || h.data()[m] - next > bank)
                     continue; // above the foot of the bank, or a cliff
                 allowed[m] = next;
                 source[m] = source[c];
