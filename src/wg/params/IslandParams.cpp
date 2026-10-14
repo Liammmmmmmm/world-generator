@@ -516,6 +516,12 @@ void resolveErosion(ParamResolver& r, IslandParams& p) {
     if (t.rate < 0.0 || t.rate > 1.0 || t.sedimentTalusAngleDeg <= 0.0 || t.sedimentTalusAngleDeg >= 90.0 ||
         t.underwaterTalusAngleDeg <= 0.0 || t.underwaterTalusAngleDeg >= 90.0)
         throw ConfigError("'erosion.thermal': rate in [0, 1], talus angles in (0, 90)");
+
+    auto& lakes = p.erosion.lakes;
+    lakes.enabled = r.flag("erosion.lakes.enabled", true);
+    lakes.minDepthM = r.number("erosion.lakes.min_depth_m", 2.0);
+    if (lakes.minDepthM <= 0.0)
+        throw ConfigError("'erosion.lakes.min_depth_m' must be positive");
 }
 
 void resolveHydrology(ParamResolver& r, IslandParams::Hydrology& h) {

@@ -46,10 +46,11 @@ void relax(ErosionMap& map, const Rock& rock, float rate, int i, int j, Received
         float transfer = 0.0f;
         if (high.sediment > 0.0f) // loose material, at most what there is
             transfer = std::min(high.sediment,
-                                rate * std::max(0.0f, std::abs(diff) - rock.sedimentTalus(high) * n.distance) / 2.0f);
-        // The rock itself gives way, above the sea only (no erosion under water).
-        const float rockExcess =
-            high.height - high.sediment >= 0.0f ? std::abs(diff) - rock.rockTalus(hi, hj, high) * n.distance : 0.0f;
+                                rate * std::max(0.0f, std::abs(diff) - rock.sedimentTalus(map.underwater(hi, hj)) * n.distance) / 2.0f);
+        // The rock itself gives way, above the water only (no erosion under water).
+        const float rockExcess = high.height - high.sediment >= map.water(hi, hj)
+                                     ? std::abs(diff) - rock.rockTalus(hi, hj, high) * n.distance
+                                     : 0.0f;
         if (rockExcess > 0.0f)
             transfer = std::max(transfer, rate * rockExcess / 2.0f);
         if (transfer <= 0.0f)

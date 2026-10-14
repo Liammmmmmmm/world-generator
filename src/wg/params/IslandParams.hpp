@@ -207,8 +207,14 @@ struct IslandParams {
             bool enabled = true;
             double rate = 0.0;
             double sedimentTalusAngleDeg = 0.0;
-            double underwaterTalusAngleDeg = 0.0; // sediment below sea level
+            double underwaterTalusAngleDeg = 0.0; // sediment under water (sea or lake)
         } thermal;
+        // Lakes during the erosion: the depressions deep enough hold water, in
+        // which drops only deposit (as in the sea): deltas, not a filled hollow.
+        struct Lakes {
+            bool enabled = true;
+            double minDepthM = 0.0;
+        } lakes;
     } erosion;
 
     // Rivers and lakes on the final terrain, at the block resolution (step 5).

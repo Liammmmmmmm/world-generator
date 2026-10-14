@@ -26,10 +26,13 @@ struct ErosionCell {
 
 // The erosion grid: one cell per cell of the island grid, 1 unit wide. FIXED
 // cells (the map border) are never modified: what reaches them leaves the domain.
+// Each cell also has a water level: 0 (the sea), or the level of the lake it
+// is in (see updateLakes). A cell below its water level is under water.
 class ErosionMap {
 public:
     ErosionMap(int nx, int ny)
-        : nx_(nx), ny_(ny), cells_(static_cast<std::size_t>(nx) * ny), fixed_(cells_.size(), 0) {}
+        : nx_(nx), ny_(ny), cells_(static_cast<std::size_t>(nx) * ny), fixed_(cells_.size(), 0),
+          water_(cells_.size(), 0.0f) {}
 
     int nx() const { return nx_; }
     int ny() const { return ny_; }
@@ -46,6 +49,10 @@ public:
     bool fixed(int i, int j) const { return fixed_[index(i, j)] != 0; }
     void setFixed(int i, int j) { fixed_[index(i, j)] = 1; }
 
+    float water(int i, int j) const { return water_[index(i, j)]; }
+    std::vector<float>& water() { return water_; }
+    bool underwater(int i, int j) const { return at(i, j).height < water(i, j); }
+
     // Height gradient (dh/dx, dh/dy) by centered differences, one-sided on the
     // grid border.
     Vec2 gradient(int i, int j) const {
@@ -59,6 +66,7 @@ private:
     int nx_, ny_;
     std::vector<ErosionCell> cells_;
     std::vector<std::uint8_t> fixed_;
+    std::vector<float> water_;
 };
 
 } // namespace wg::erosion

@@ -119,7 +119,9 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
             if ((state[k] & kFilled) || parent[k] == kNone)
                 return false;
             target -= kEpsilonM;
-            if (elev[k] - target > p.breachMaxDepthM || ++cells > maxCutCells)
+            // Depth below the original ground (h, not yet cut), or successive
+            // cuts would deepen a channel without limit.
+            if (h.data()[k] - target > p.breachMaxDepthM || ++cells > maxCutCells)
                 return false;
             neighbor(k, parent[k], k);
         }

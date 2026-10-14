@@ -17,7 +17,7 @@ struct DropParams {
     float dischargeScale = 0.4f; // discharge_norm = erf(scale * discharge)
     const Rock* rock = nullptr;  // rock erodibility and talus (required)
     float thermalRate = 0.0f;    // avalanche after each change of a cell; 0: none
-    int underwaterSteps = 10;    // iterations after entering the sea, depositing as it goes
+    int underwaterSteps = 10;    // iterations after entering the water, depositing as it goes
 };
 
 // Runs one drop of water from (x, y), a position on a land cell, until it dies
@@ -26,10 +26,10 @@ struct DropParams {
 // transfer, which makes rivers meander). Along its path it adds its volume and
 // momentum to the tracks of each cell it crosses,
 // erodes or deposits on the cell it leaves, and drops what it carries where
-// it dies; each modified cell then avalanches. In the sea (below 0) it goes on
-// for a few iterations, slowed down and only depositing, which builds deltas
-// and beaches in front of the river mouths. Returns the sediment that left
-// the domain (map border).
+// it dies; each modified cell then avalanches. Under water (the sea, below 0,
+// or a lake) it goes on for a few iterations, slowed down and only
+// depositing, which builds deltas and beaches in front of the river mouths.
+// Returns the sediment that left the domain (map border).
 float descend(ErosionMap& map, const DropParams& params, float x, float y);
 
 } // namespace wg::erosion

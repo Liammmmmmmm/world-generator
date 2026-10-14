@@ -35,10 +35,10 @@ public:
     float erodibility(int i, int j, const ErosionCell& cell) const { return erodibility_[material(i, j, cell)]; }
 
     // Steepest stable slopes (height per cell), from the talus angles: of the
-    // rock at the cell's rock surface, and of loose sediment (lower under the
-    // sea, below height 0).
+    // rock at the cell's rock surface, and of loose sediment (lower under
+    // water: the sea or a lake).
     float rockTalus(int i, int j, const ErosionCell& cell) const { return talus_[material(i, j, cell)]; }
-    float sedimentTalus(const ErosionCell& cell) const { return cell.height < 0.0f ? underwaterTalus_ : sedimentTalus_; }
+    float sedimentTalus(bool underwater) const { return underwater ? underwaterTalus_ : sedimentTalus_; }
 
     // The lowest talus of all: no slope under it can be unstable.
     float minTalus() const { return minTalus_; }

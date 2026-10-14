@@ -17,6 +17,7 @@ add_library(wg
   wg/params/ParamResolver.cpp
   wg/erosion/Avalanche.cpp
   wg/erosion/Drop.cpp
+  wg/erosion/Lakes.cpp
   wg/erosion/Rock.cpp
   wg/erosion/ParticleErosion.cpp
   wg/island/Geology.cpp

@@ -73,9 +73,11 @@ Les cellules remplies forment des composantes connexes. Pour chacune, le niveau 
 si elle a au moins `lake_min_depth_m` d'eau et `lake_min_area_m2` de surface sous ce niveau.
 Sinon, elle est **comblée** jusqu'à son niveau de débordement, comme le feraient des
 sédiments : ni creux sec, ni flaque.
-Avec les réglages par défaut, les îles testées n'ont aucun lac : toutes leurs dépressions
-font moins de 3 m et sont creusées. Augmenter `lake_min_depth_m` ou baisser
-`breach_max_depth_m` en fait apparaître.
+Les lacs viennent surtout des cuvettes que l'érosion a gardées en eau ([étape 3, lacs](etape-3-erosion.md)) :
+sur la seed 7, les deux caldeiras deviennent des lacs de 2,4 et 2,8 ha. Les dépressions de
+moins de `breach_max_depth_m` sont creusées. Cette profondeur se mesure sous le terrain
+d'origine : auparavant, chaque coupe se mesurait sous le terrain déjà creusé, et des coupes
+successives de moins de 3 m traversaient une caldeira de 27 m de profondeur.
 
 ### 3.5 Rivières
 

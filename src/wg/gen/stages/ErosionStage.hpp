@@ -7,8 +7,9 @@ namespace wg {
 
 // Step 3: particle-based hydraulic erosion of the island (erosion.particles,
 // see wg/erosion/). Reads "h" and the flags of the initialization, erodes "h"
-// step by step, and produces "sediment", "discharge_norm", "eroded" and
-// "momentum". Follows StageContext::step, so the viewer can pause it or watch
+// step by step, and produces "sediment", "discharge_norm", "eroded",
+// "momentum" and "water" (the lakes kept in deep depressions, erosion.lakes).
+// Follows StageContext::step, so the viewer can pause it or watch
 // it step by step.
 class ErosionStage final : public Stage {
 public:

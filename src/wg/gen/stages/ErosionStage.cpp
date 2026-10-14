@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "wg/core/WorldState.hpp"
+#include "wg/erosion/Lakes.hpp"
 #include "wg/erosion/ParticleErosion.hpp"
 #include "wg/erosion/Rock.hpp"
 #include "wg/island/Geology.hpp"
@@ -14,6 +15,9 @@
 namespace wg {
 
 namespace {
+
+// The lakes follow the terrain: found again every this many steps.
+constexpr int kLakeUpdateSteps = 50;
 
 std::string format(const char* pattern, auto... args) {
     char buffer[256];
@@ -38,6 +42,8 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
                                                 {LayerStyle::Direction, {std::string(layers::kMomentumNorm)}});
     Grid2D<float>& momentumNorm = world.createLayer(layers::kMomentumNorm, nx, ny, 0.0f, {LayerStyle::Scalar, {}});
     Grid2D<float>& surfaceMaterial = world.editLayer(layers::kSurfaceMaterial);
+    std::vector<std::string> kindNames(std::begin(layers::kWaterKindNames), std::end(layers::kWaterKindNames));
+    Grid2D<float>& water = world.createLayer(layers::kWater, nx, ny, layers::kDry, {LayerStyle::Categorical, kindNames});
 
     // To the normalized frame: cells 1 unit wide, heights in height_scale_m
     // from sea level.
@@ -70,10 +76,16 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
                 momentum.at(i, j) = std::atan2(cell.momentumY, cell.momentumX);
                 momentumNorm.at(i, j) = std::hypot(cell.momentumX, cell.momentumY);
                 surfaceMaterial.at(i, j) = static_cast<float>(rock.material(i, j, cell));
+                water.at(i, j) = !map.underwater(i, j) ? layers::kDry
+                                 : map.water(i, j) > 0.0f ? layers::kLake
+                                                          : layers::kSea;
             }
         }
     };
 
+    const auto& lakes = island.erosion.lakes;
+    const float lakeMinDepth = static_cast<float>(lakes.minDepthM / scale);
+    int lakeCount = lakes.enabled ? erosion::updateLakes(map, lakeMinDepth) : 0;
     if (!params.enabled || params.steps == 0) {
         publish();
         return;
@@ -106,11 +118,13 @@ void ErosionStage::run(WorldState& world, const StageContext& context) {
     const int logEvery = std::max(1, params.steps / 10);
     for (int s = 0; s < params.steps; ++s) {
         erosion.step(s);
+        if (lakes.enabled && (s + 1) % kLakeUpdateSteps == 0)
+            lakeCount = erosion::updateLakes(map, lakeMinDepth);
         if ((s + 1) % logEvery == 0 || s + 1 == params.steps) {
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             const double drift = erosion.totalMass() - mass0;
-            context.log(format("step %d: %.2f ms/step, sediment out %.1f, mass drift %.3g (%.2g of sum |h|)", s + 1,
-                               1000.0 * seconds / (s + 1), erosion.lostSediment(), drift,
+            context.log(format("step %d: %.2f ms/step, %d lakes, sediment out %.1f, mass drift %.3g (%.2g of sum |h|)",
+                               s + 1, 1000.0 * seconds / (s + 1), lakeCount, erosion.lostSediment(), drift,
                                drift / std::max(1.0, magnitude)));
         }
         context.step(s + 1, params.steps, publish);

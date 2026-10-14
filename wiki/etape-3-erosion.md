@@ -56,7 +56,9 @@ champs de sa cellule à la fois) :
 | `momentum_x/y`, `*_track` | élan moyen de l'eau (jalon C) |
 
 Le flag `FIXED` (anneau de bord) est rangé à côté : ces cellules ne sont jamais modifiées, et
-ce qui les atteint quitte le domaine.
+ce qui les atteint quitte le domaine. Chaque cellule a aussi un **niveau d'eau** : 0 (la mer),
+ou le niveau du lac où elle se trouve (section 3.4). Une cellule plus basse que son niveau
+d'eau est **sous l'eau**.
 
 ## 3. Algorithme
 
@@ -84,11 +86,11 @@ pour chaque cellule :
 Volume 1, sédiment 0, vitesse nulle. À chaque itération, sur la cellule `floor(pos)` :
 
 1. **Mort** sur place si `age > max_age`, si `volume < min_volume` ou après
-   `underwater_steps` itérations en mer : elle dépose tout ce qu'elle porte sur cette cellule.
-   **En mer** (`h < 0`), la goutte continue donc quelques itérations : sa gravité est réduite
+   `underwater_steps` itérations sous l'eau : elle dépose tout ce qu'elle porte sur cette cellule.
+   **Sous l'eau** (en mer, `h < 0`, ou dans un lac), la goutte continue donc quelques itérations : sa gravité est réduite
    à 30 % (elle file surtout sur son élan, un jet dans la mer) et elle ne fait que déposer
    (`c_eq = 0`, jamais d'érosion sous l'eau). Son sédiment se dépose en avançant : deltas et
-   plages devant les embouchures.
+   plages devant les embouchures, deltas à l'entrée des lacs.
 2. **Gravité** : `g` le gradient de hauteur (différences centrées, décentrées au bord),
    `n = normalize(−g.x, 1, −g.y)`, `speed += gravity · (n.x, n.z) / volume`.
    **Élan** : le courant moyen de la cellule (`momentum`) entraîne la goutte, d'autant plus
@@ -143,10 +145,10 @@ si |diff| > limite :
 
 Deux talus par cellule haute :
 - **ses sédiments meubles** glissent au-delà du talus des sédiments
-  (`thermal.sediment_talus_angle_deg`, ou `thermal.underwater_talus_angle_deg` sous la mer),
+  (`thermal.sediment_talus_angle_deg`, ou `thermal.underwater_talus_angle_deg` sous l'eau),
   **mais pas plus que leur épaisseur** : un voile de sable ne fait pas tomber une falaise ;
-- **sa roche** cède au-delà du talus de son matériau, **au-dessus de la mer seulement** (pas
-  d'érosion sous l'eau).
+- **sa roche** cède au-delà du talus de son matériau, **hors de l'eau seulement** (pas
+  d'érosion sous l'eau, ni en mer ni dans un lac).
 
 Le transfert est le plus grand des deux. La matière déplacée devient du **sédiment** chez la
 cellule basse. Les cellules qui reçoivent sont vérifiées à leur tour, dans l'ordre (en largeur
@@ -164,6 +166,41 @@ On compare chaque paire, comme SimpleHydrology. soillib compare plutôt chaque v
 moyenne locale (la cellule et ses 8 voisins), ce qui marque moins la grille ; c'est une
 variante à garder en tête si des directions de grille apparaissent.
 
+### Lacs ([Lakes.cpp](../src/wg/erosion/Lakes.cpp))
+
+Sans eau, une cuvette se comble : chaque goutte qui y tombe y meurt et y laisse tout ce
+qu'elle porte, et ses parois s'y éboulent. Mesuré avant l'introduction des lacs, en 4096² :
+une caldeira de 80 m de profondeur et 9 ha (volcanique, seed 3), des cuvettes de 28 à 32 m
+(volcanique, seed 7), de 55 m (montagnes d'une continentale, seed 2) ; après l'érosion, plus
+aucune cuvette de plus de 4 m.
+
+Une règle, la même que pour la mer : **une dépression assez profonde est un lac, et sous
+l'eau on ne creuse pas, on dépose.**
+
+- **Où sont les lacs** : tous les 50 pas (et au départ), un Priority-Flood (Barnes 2014)
+  depuis la mer et le bord de la carte donne le niveau de débordement de chaque cellule. Une
+  dépression (composante connexe de cellules sous ce niveau) d'au moins
+  `lakes.min_depth_m` est un lac, remplie jusqu'à ce niveau ; les autres restent sèches. Les
+  lacs suivent ainsi le terrain : un lac comblé par son delta ou vidé par l'érosion de son
+  seuil disparaît.
+- **Dans un lac**, une goutte se comporte comme en mer : gravité réduite, dépôt seulement,
+  mort après `underwater_steps` itérations. Les sédiments forment un delta à l'entrée au lieu
+  de remplir le fond, et la roche immergée ne s'éboule plus.
+- **L'eau ne ressort pas** : une goutte meurt dans le lac, le seuil n'est creusé que par les
+  gouttes nées en aval. C'est ce qui garde les lacs : l'eau qui en sort est claire, et
+  l'érosion de leur exutoire est lente.
+
+Résultat (4096², mêmes îles) : les caldeiras restent en eau (deux lacs de 24 et 26 m sur la
+seed 7, une caldeira de 70 m sur la seed 3). Les cuvettes de montagne de la continentale,
+étroites (0,35 ha) et aux parois plus raides que le talus, se comblent quand même par
+éboulement. Le coût ne se voit pas dans le bruit de mesure (seed 7 : 9,0 s d'érosion avec les
+lacs, 10,5 s sans).
+
+| Paramètre | Défaut | Rôle |
+|-----------|--------|------|
+| `lakes.enabled` | true | lacs pendant l'érosion |
+| `lakes.min_depth_m` | 2 | profondeur minimale d'un lac (en dessous : une flaque, sans effet) |
+
 ### Bilan de masse
 
 `Σ h + sédiment sorti du domaine` est constant (aucune goutte n'est vivante entre deux pas).
@@ -178,6 +215,7 @@ des float.
 | `h` | altitude érodée (m) |
 | `sediment` | épaisseur de sédiments meubles (m) |
 | `discharge_norm` | `erf(discharge_scale · discharge)`, dans [0, 1) : le réseau hydrographique |
+| `water` | sec, mer ou lac (remplacé par l'hydrologie, aux blocs) |
 | `eroded` | `h_initial − h` (m) : rouge = érosion, bleu = dépôt |
 | `momentum` | direction de l'élan moyen de l'eau (radians), style `Direction` : teinte = direction, intensité = norme |
 | `momentum_norm` | norme de l'élan moyen |

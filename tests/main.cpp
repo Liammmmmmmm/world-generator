@@ -11,6 +11,7 @@
 #include "wg/core/WorldState.hpp"
 #include "wg/erosion/Avalanche.hpp"
 #include "wg/erosion/Drop.hpp"
+#include "wg/erosion/Lakes.hpp"
 #include "wg/erosion/Rock.hpp"
 #include "wg/gen/Pipeline.hpp"
 #include "wg/gen/StageRegistry.hpp"
@@ -706,7 +707,7 @@ void testErosion() {
     double drift = 1.0;
     const auto last = std::find_if(logs.rbegin(), logs.rend(), [](const std::string& m) { return m.starts_with("step "); });
     CHECK(last != logs.rend());
-    std::sscanf(last->c_str(), "step %*d: %*f ms/step, sediment out %*f, mass drift %*g (%lg", &drift);
+    std::sscanf(last->c_str(), "step %*d: %*f ms/step, %*d lakes, sediment out %*f, mass drift %*g (%lg", &drift);
     CHECK(std::abs(drift) < 1e-7);
 
     // Deterministic.
@@ -925,6 +926,41 @@ void testDropOnFadingFlow() {
     CHECK(finite);
 }
 
+void testLakes() {
+    // A crater on a hill: a lake up to its rim; drops running into it only
+    // deposit there (no erosion under water), as in the sea.
+    const auto params = wg::WorldConfig::fromJson({{"seed", 1}}).island();
+    const wg::Geology geology(params);
+    const int n = 41;
+    const wg::erosion::Rock rock(geology, params.geology.materials, {n, n, 1.0, 1.0, 0.0}, 1.0, 33.0, 18.0);
+    wg::erosion::ErosionMap map(n, n);
+    for (int j = 0; j < n; ++j) {
+        for (int i = 0; i < n; ++i) {
+            const float r = std::hypot(static_cast<float>(i - 20), static_cast<float>(j - 20));
+            map.at(i, j).height = r < 8.0f ? 20.0f + 0.5f * r : 24.0f - 0.25f * (r - 8.0f); // rim at r = 8
+            if (i == 0 || j == 0 || i == n - 1 || j == n - 1)
+                map.setFixed(i, j);
+        }
+    }
+    CHECK(wg::erosion::updateLakes(map, 1.0f) == 1);
+    CHECK(map.underwater(20, 20) && std::abs(map.water(20, 20) - map.water(23, 20)) < 1e-6f &&
+          map.water(20, 20) > 23.0f && map.water(20, 20) <= 24.0f && !map.underwater(20, 30));
+    CHECK(wg::erosion::updateLakes(map, 10.0f) == 0 && !map.underwater(20, 20)); // too shallow for a lake
+    wg::erosion::updateLakes(map, 1.0f);
+    std::vector<float> before(map.size());
+    for (std::size_t k = 0; k < map.size(); ++k)
+        before[k] = map[k].height;
+    wg::erosion::DropParams drop;
+    drop.rock = &rock;
+    for (int d = 0; d < 50; ++d) // from just outside the rim, inwards
+        wg::erosion::descend(map, drop, 20.5f + 9.0f * std::cos(d * 0.3f), 20.5f + 9.0f * std::sin(d * 0.3f));
+    bool erodedUnderwater = false;
+    for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i)
+            erodedUnderwater |= map.at(i, j).height < map.water(i, j) && map.at(i, j).height < before[map.index(i, j)] - 1e-5f;
+    CHECK(!erodedUnderwater);
+}
+
 void testStepGate() {
     // A gate asking for every step gets one preview per step, in order.
     std::vector<int> steps;
@@ -1021,6 +1057,7 @@ int main() {
     testMinecraftExport();
     testAvalanche();
     testDropOnFadingFlow();
+    testLakes();
     testStepGate();
     testVoxelVolume();
     testWorldFileRoundTrip();

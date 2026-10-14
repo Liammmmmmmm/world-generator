@@ -187,13 +187,17 @@
       "discharge_scale": 0.4,          // discharge_norm = erf(discharge_scale * débit)
       "hardness_influence": 1.0,       // la roche à nu s'érode au taux erodibility^hardness_influence (sédiments : 1)
       "height_scale_m": null,          // mètres par unité de hauteur ; null = taille d'une cellule (géométrie vraie)
-      "underwater_steps": 10           // itérations d'une goutte après son entrée en mer : ralentie, elle ne fait que déposer (deltas)
+      "underwater_steps": 10           // itérations d'une goutte après son entrée dans l'eau (mer, lac) : ralentie, elle ne fait que déposer (deltas)
     },
     "thermal": {                       // avalanche après chaque modification d'une cellule, talus du matériau à nu ou des sédiments
       "enabled": true,
       "rate": null,                    // part de l'excès de pente déplacée [0.6, 1]
       "sediment_talus_angle_deg": 33,  // angle de talus des sédiments meubles
-      "underwater_talus_angle_deg": 18 // angle de talus des sédiments sous la mer (la roche sous-marine ne s'éboule pas)
+      "underwater_talus_angle_deg": 18 // angle de talus des sédiments sous l'eau (la roche sous l'eau ne s'éboule pas)
+    },
+    "lakes": {                         // les dépressions assez profondes se remplissent d'eau, comme la mer : les gouttes
+      "enabled": true,                 // n'y creusent plus et ne font qu'y déposer (deltas), au lieu de combler le creux
+      "min_depth_m": 2                 // profondeur minimale d'un lac (sinon : une simple flaque, sans effet)
     }
   },
 
