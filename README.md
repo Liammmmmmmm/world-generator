@@ -141,8 +141,7 @@ l'étape) et les paramètres propres à l'étape.
 | `erosion`     | Étape 3 : érosion hydraulique par particules ([wiki](wiki/etape-3-erosion.md))                 |
 | `upscale`     | Étape 4 : `h` à la résolution des blocs, en bicubique ([wiki](wiki/etape-5-hydrologie.md))     |
 | `hydrology`   | Étape 5 : rivières et lacs, aux blocs ([wiki](wiki/etape-5-hydrologie.md))                     |
-| `postprocess` | Étape 6 : vide pour l'instant (falaises côtières à venir)                                      |
-| `voxelize`    | Étape 7 : blocs (stone, grass/dirt selon la pente, rivières, lacs, mer) ([wiki](wiki/etape-7-voxelisation.md)) |
+| `voxelize`    | Étape 6 : blocs (stone, grass/dirt selon la pente, rivières, lacs, mer) ([wiki](wiki/etape-6-voxelisation.md)) |
 
 #### `island_init`
 

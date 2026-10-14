@@ -687,9 +687,8 @@ void testErosion() {
     wg::PipelineCallbacks callbacks;
     callbacks.onLog = [&](std::size_t, const std::string& message) { logs.push_back(message); };
     const auto snapshots = runErosion(nlohmann::json::object(), callbacks);
-    CHECK(snapshots.size() == 7 && snapshots[2].stageName == "erosion" && snapshots[3].stageName == "upscale" &&
-          snapshots[4].stageName == "hydrology" && snapshots[5].stageName == "postprocess" &&
-          snapshots[6].stageName == "voxelize");
+    CHECK(snapshots.size() == 6 && snapshots[2].stageName == "erosion" && snapshots[3].stageName == "upscale" &&
+          snapshots[4].stageName == "hydrology" && snapshots[5].stageName == "voxelize");
     const auto& state = snapshots[2].state;
     CHECK(snapshots[2].step == 30 && snapshots[2].totalSteps == 30);
 
@@ -776,8 +775,8 @@ void testHydrology() {
 
 void testVoxelize() {
     const auto snapshots = runErosion(nlohmann::json::object(), {}, kSmallRivers);
-    const auto& state = snapshots[6].state;
-    CHECK(snapshots[6].stageName == "voxelize" && state.hasVoxels() && snapshots[6].voxelsChanged);
+    const auto& state = snapshots[5].state;
+    CHECK(snapshots[5].stageName == "voxelize" && state.hasVoxels() && snapshots[5].voxelsChanged);
     const auto& voxels = state.voxels();
     const auto& info = state.info();
     CHECK(voxels.width() == info.width && voxels.length() == info.length);

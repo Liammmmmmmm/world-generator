@@ -1,4 +1,4 @@
-# Étape 7 : voxelisation (`voxelize`) et export Minecraft
+# Étape 6 : voxelisation (`voxelize`) et export Minecraft
 
 Transformer la carte de hauteurs en blocs, puis écrire le monde au format Minecraft. Une
 première version volontairement simple : peu de matériaux, pas encore de végétation ni de

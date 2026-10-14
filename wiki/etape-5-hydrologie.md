@@ -4,7 +4,7 @@ Tracer les rivières et les lacs sur le terrain final, bloc par bloc. Les riviè
 montagne, d'un bloc de large, là où peu d'eau s'est encore rassemblée, puis se rejoignent en
 cours d'eau de plus en plus larges jusqu'à la mer ; les vraies cuvettes deviennent des lacs.
 
-← [Étape 3 : érosion](etape-3-erosion.md) · [Étape 7 : voxelisation](etape-7-voxelisation.md) ·
+← [Étape 3 : érosion](etape-3-erosion.md) · [Étape 6 : voxelisation](etape-6-voxelisation.md) ·
 [Vue d'ensemble](README.md)
 
 Code : [UpscaleStage.cpp](../src/wg/gen/stages/UpscaleStage.cpp),

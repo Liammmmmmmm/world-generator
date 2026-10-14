@@ -224,7 +224,7 @@ struct IslandParams {
         double breachMaxLengthM = 0.0; // ...and this long; deeper ones are filled (lakes)
     } hydrology;
 
-    // Conversion of the heightmap to blocks (step 7).
+    // Conversion of the heightmap to blocks (step 6).
     struct Voxelization {
         bool enabled = true;
         int dirtDepthBlocks = 0;       // dirt under the grass on gentle slopes

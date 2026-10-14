@@ -11,7 +11,7 @@ notice d'utilisation (build, commandes, contrôles du viewer).
 | [Étape 2 : initialisation de l'île](etape-2-initialisation.md) | Masque, bathymétrie, topographie, montagnes, géologie |
 | [Étape 3 : érosion](etape-3-erosion.md) | Érosion hydraulique par particules, repère normalisé, lecture pas à pas |
 | [Étapes 4 et 5 : upscale et hydrologie](etape-5-hydrologie.md) | Terrain aux blocs, rivières (sources, confluences) et lacs |
-| [Étape 7 : voxelisation et export Minecraft](etape-7-voxelisation.md) | Hauteurs → blocs, monde Minecraft Java (Anvil) |
+| [Étape 6 : voxelisation et export Minecraft](etape-6-voxelisation.md) | Hauteurs → blocs, monde Minecraft Java (Anvil) |
 
 ---
 
@@ -66,7 +66,7 @@ src/wg/                       bibliothèque "wg", sans dépendance au rendu
     StageRegistry  "type" → fabrique d'étape, et pipeline par défaut
     Pipeline       construit et exécute les étapes, produit les snapshots, gère live/annulation
     stages/        les étapes : ParametersStage, IslandInitStage, ErosionStage, UpscaleStage,
-                   HydrologyStage, PostprocessStage, VoxelizeStage, BuiltinStages.cpp (registre)
+                   HydrologyStage, VoxelizeStage, BuiltinStages.cpp (registre)
   island/
     IslandLayers   noms des calques de l'île et flags de cellule (contrat entre étapes)
     IslandGrid     géométrie de la grille de simulation (taille, cellule, coordonnées)
@@ -127,7 +127,7 @@ Une étape ([Stage.hpp](../src/wg/gen/Stage.hpp)) implémente
 Le viewer utilise ces changements pour afficher par défaut ce que l'étape a produit.
 
 Le **pipeline par défaut** est défini en code dans
-[BuiltinStages.cpp](../src/wg/gen/stages/BuiltinStages.cpp) (`parameters`, `island_init`, `erosion`, `upscale`, `hydrology`, `postprocess`, `voxelize`). Une
+[BuiltinStages.cpp](../src/wg/gen/stages/BuiltinStages.cpp) (`parameters`, `island_init`, `erosion`, `upscale`, `hydrology`, `voxelize`). Une
 clé `"pipeline"` dans la config permet de le remplacer, par exemple pour tester une étape
 seule.
 

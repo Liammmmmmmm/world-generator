@@ -5,7 +5,7 @@
 
 namespace wg {
 
-// Step 7: turns the heightmap into blocks. "h" is already at the block
+// Step 6: turns the heightmap into blocks. "h" is already at the block
 // resolution (upscale stage): one column per cell, filled with simple
 // materials:
 //   - bedrock at the bottom, stone below the surface;

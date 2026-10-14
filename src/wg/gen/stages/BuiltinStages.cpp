@@ -7,7 +7,6 @@
 #include "wg/gen/stages/HydrologyStage.hpp"
 #include "wg/gen/stages/IslandInitStage.hpp"
 #include "wg/gen/stages/ParametersStage.hpp"
-#include "wg/gen/stages/PostprocessStage.hpp"
 #include "wg/gen/stages/UpscaleStage.hpp"
 #include "wg/gen/stages/VoxelizeStage.hpp"
 
@@ -21,7 +20,6 @@ const StageRegistry& StageRegistry::builtin() {
         r.add<ErosionStage>("erosion");
         r.add<UpscaleStage>("upscale");
         r.add<HydrologyStage>("hydrology");
-        r.add<PostprocessStage>("postprocess");
         r.add<VoxelizeStage>("voxelize");
         return r;
     }();
@@ -35,7 +33,6 @@ const std::vector<std::string>& StageRegistry::defaultPipeline() {
         "erosion",
         "upscale",
         "hydrology",
-        "postprocess",
         "voxelize",
     };
     return stages;

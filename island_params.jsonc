@@ -212,7 +212,7 @@
     "breach_max_length_m": 300         // ...et aussi long ; sinon elle est remplie (lac)
   },
 
-  // Étape 7 : carte de hauteurs (déjà aux blocs) -> blocs (voir aussi world.vertical_exaggeration).
+  // Étape 6 : carte de hauteurs (déjà aux blocs) -> blocs (voir aussi world.vertical_exaggeration).
   "voxelization": {
     "enabled": true,
     "dirt_depth_blocks": 3,            // couches de dirt sous l'herbe, en pente douce
