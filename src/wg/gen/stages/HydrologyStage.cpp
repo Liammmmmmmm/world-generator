@@ -266,6 +266,24 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
     }
     context.progress(0.7f);
 
+    // A lake holds at least one block of water everywhere: its bed is lowered
+    // below the top block of its surface (a top block is the one whose top
+    // face is at floor(y), see the voxelization). Without this, its shallow
+    // margin had no water block: a ring of ground around the lake, cutting it
+    // from its outlet, and a shallow lake vanished entirely.
+    {
+        const auto& w = world.params().values.world;
+        const double toBlocks = w.verticalExaggeration / context.info.blockSizeM; // vertical meters -> blocks
+        const auto blockY = [&](double altitude) { return context.info.seaLevel + (altitude - sea) * toBlocks; };
+        for (std::size_t k = 0; k < n; ++k) {
+            if (static_cast<int>(kind.data()[k]) != layers::kLake)
+                continue;
+            const double surfaceTop = std::floor(blockY(water.data()[k])); // top face of the water
+            const double floor = sea + (surfaceTop - 1.0 - context.info.seaLevel) / toBlocks;
+            h.data()[k] = std::min(h.data()[k], static_cast<float>(floor));
+        }
+    }
+
     // Dry ground left below sea level (a few cells along the shore, not
     // connected to the ocean) is raised to it: flush with the sea, not a hole.
     for (std::size_t k = 0; k < n; ++k)
@@ -399,6 +417,42 @@ void HydrologyStage::run(WorldState& world, const StageContext& context) {
         h.data()[b] = std::min(h.data()[b], level[b] - depth[b]); // the bed
         water.data()[b] = level[b];
         kind.data()[b] = layers::kRiver;
+    }
+    // Mouths: the river bed goes on under the sea, and the sea floor in front
+    // of it rises no steeper than sediment at rest under water
+    // (erosion.thermal.underwater_talus_angle_deg), rather than a wall of
+    // ground right where the river meets the sea.
+    {
+        const float rise = static_cast<float>(
+            std::tan(world.params().values.erosion.thermal.underwaterTalusAngleDeg * std::numbers::pi / 180.0) * cellM);
+        std::priority_queue<Entry, std::vector<Entry>, std::greater<>> floor;
+        for (std::size_t b = 0; b < n; ++b) {
+            if (static_cast<int>(kind.data()[b]) != layers::kRiver)
+                continue;
+            for (int d = 0; d < 8; ++d) {
+                std::size_t m;
+                if (neighbor(b, d, m) && static_cast<int>(kind.data()[m]) == layers::kSea) {
+                    floor.push({h.data()[b], static_cast<std::uint32_t>(b)});
+                    break;
+                }
+            }
+        }
+        while (!floor.empty()) {
+            const auto [top, c] = floor.top();
+            floor.pop();
+            if (static_cast<int>(kind.data()[c]) == layers::kSea && top > h.data()[c])
+                continue; // superseded
+            for (int d = 0; d < 8; ++d) {
+                std::size_t m;
+                if (!neighbor(c, d, m) || static_cast<int>(kind.data()[m]) != layers::kSea)
+                    continue;
+                const float next = top + rise * ((d % 2) ? std::numbers::sqrt2_v<float> : 1.0f);
+                if (next >= h.data()[m])
+                    continue; // the sea floor is already deeper
+                h.data()[m] = next;
+                floor.push({next, static_cast<std::uint32_t>(m)});
+            }
+        }
     }
     finish();
     context.log(std::to_string(sources) + " river sources, " + std::to_string(riverCells) + " river path cells, " +

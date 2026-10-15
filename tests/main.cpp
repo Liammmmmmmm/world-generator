@@ -792,6 +792,26 @@ void testHydrology() {
             if (is(i, j, wg::layers::kDry))
                 deepestCut = std::max(deepestCut, before.at(i, j) - h.at(i, j));
     CHECK(deepestCut <= 4.01f);
+
+    // Every lake and river cell holds at least one block of water (top
+    // blocks at floor(y) - 1, see the voxelization), and the sea floor in
+    // front of a mouth rises at most at the underwater talus (18°).
+    int dryWater = 0, mouthSteps = 0;
+    const float underwaterRise = static_cast<float>(std::tan(18.0 * std::numbers::pi / 180.0) * cellM) *
+                                     std::numbers::sqrt2_v<float> + 1e-3f;
+    for (int j = 1; j < ny - 1; ++j) {
+        for (int i = 1; i < nx - 1; ++i) {
+            if (!is(i, j, wg::layers::kRiver) && !is(i, j, wg::layers::kLake))
+                continue;
+            dryWater += std::floor(water.at(i, j)) <= std::floor(h.at(i, j));
+            if (!is(i, j, wg::layers::kRiver))
+                continue;
+            for (int dj = -1; dj <= 1; ++dj)
+                for (int di = -1; di <= 1; ++di)
+                    mouthSteps += is(i + di, j + dj, wg::layers::kSea) && h.at(i + di, j + dj) > h.at(i, j) + underwaterRise;
+        }
+    }
+    CHECK(dryWater == 0 && mouthSteps == 0);
 }
 
 void testVoxelize() {

@@ -73,6 +73,12 @@ Les cellules remplies forment des composantes connexes. Pour chacune, le niveau 
 si elle a au moins `lake_min_depth_m` d'eau et `lake_min_area_m2` de surface sous ce niveau.
 Sinon, elle est **comblée** jusqu'à son niveau de débordement, comme le feraient des
 sédiments : ni creux sec, ni flaque.
+**Au moins un bloc d'eau** : le fond d'un lac est abaissé sous le bloc du dessus de sa surface
+(le bloc dont la face du dessus est à `floor(y)`, comme à la voxelisation). Sans cela, la marge
+peu profonde d'un lac (moins d'un mètre d'eau) n'avait aucun bloc d'eau : un anneau de terre
+d'un bloc entourait le lac et le coupait de sa rivière de sortie, et un lac peu profond
+disparaissait entièrement des voxels (seed 8, vers x 2990, z 1853).
+
 Les lacs viennent surtout des cuvettes que l'érosion a gardées en eau ([étape 3, lacs](etape-3-erosion.md)) :
 sur la seed 7, les deux caldeiras deviennent des lacs de 2,4 et 2,8 ha. Les dépressions de
 moins de `breach_max_depth_m` sont creusées. Cette profondeur se mesure sous le terrain
@@ -113,6 +119,10 @@ profondeur = max(1 m, river_depth_ratio × largeur)                             
   2,3 fois `river_bank_slope_deg`) et la hauteur adoucie (de 0 à `river_bank_height_m`) : ici
   une petite falaise, là une pente douce. Après cet abaissement, la surface de l'eau est de
   nouveau plafonnée par les berges (une petite marche là où la rivière descend).
+- **Embouchures** : le lit se prolonge sous la mer. Le fond devant l'embouchure ne remonte pas
+  plus raide que les sédiments au repos sous l'eau (`erosion.thermal.underwater_talus_angle_deg`,
+  18°), au lieu d'une marche de terre sous l'eau là où le lit s'arrêtait (seed 8 : 151 cellules
+  de mer à 1 m ou plus au-dessus du lit voisin, aucune désormais).
 - **Lit** : le terrain est creusé sous la surface, de `profondeur` au milieu du lit et de moins
   en moins vers les bords (profil en creux, au moins 1 m partout), et l'eau le remplit.
 
